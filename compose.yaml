@@ -1,7 +1,7 @@
 services:
   web2gem:
-    build: .
-    image: web2gem:local
+    image: "${WEB2GEM_IMAGE:-ghcr.io/guardinary/web2gem:latest}"
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${PORT:-52389}:${PORT:-52389}"

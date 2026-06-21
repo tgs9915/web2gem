@@ -162,10 +162,10 @@ Use [`.env.example`](.env.example) as the environment template and [`compose.yam
 
 ```sh
 cp .env.example .env
-docker compose up -d --build
+docker compose up -d
 ```
 
-The provided [`compose.yaml`](compose.yaml) builds the local image, maps `${PORT:-52389}:${PORT:-52389}`, and forwards the runtime variables from `.env`. Set `API_KEYS` in `.env` for shared deployments, and set `GEMINI_COOKIE` when Pro routing or large-context text attachments are needed.
+The provided [`compose.yaml`](compose.yaml) pulls `ghcr.io/guardinary/web2gem:latest` by default, maps `${PORT:-52389}:${PORT:-52389}`, and forwards the runtime variables from `.env`. Set `API_KEYS` in `.env` for shared deployments, and set `GEMINI_COOKIE` when Pro routing or large-context text attachments are needed. To pin a specific image tag, set `WEB2GEM_IMAGE=ghcr.io/guardinary/web2gem:<tag>` in `.env`.
 
 After the container starts, verify the local health route:
 
