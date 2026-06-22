@@ -1,9 +1,8 @@
 import { googleToolDefs, mergeFileRefs, openAIToolDefs } from "../toolcall/content";
-import { GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT } from "../toolcall/prompt-format";
 import { buildToolChoiceInstructionFromPolicy } from "../toolcall/policy-openai";
 import type { ToolBundle } from "../toolcall/tool-bundle";
 import { googleContentsToPrompt, googleToolChoiceInstruction } from "../promptcompat/google";
-import { appendStructuredOutputInstructionToPrepared, appendTextToPreparedWithTokens, structuredInstruction, withGeminiNativeHiddenToolsPromptForPrepared, withGeminiNativeHiddenToolsPromptWithTokens } from "../promptcompat/prompt-build";
+import { appendStructuredOutputInstructionToPrepared, appendTextToPreparedWithTokens, insertGeminiNativeHiddenToolsPrompt, structuredInstruction, withGeminiNativeHiddenToolsPromptForPrepared, withGeminiNativeHiddenToolsPromptWithTokens } from "../promptcompat/prompt-build";
 import { buildGoogleHistoryTranscript, buildOpenAIHistoryTranscript, latestGoogleUserInputText, latestOpenAIUserInputText } from "../promptcompat/history";
 import { collectOpenAIRefFileIDs } from "../promptcompat/file-refs";
 import { messagesToPrompt } from "../promptcompat/messages";
@@ -241,18 +240,9 @@ function contextFilePromptByteCheckFromBounded(cfg: RuntimeConfig, check: Prompt
 function inlinePreparedPromptByteCheck(cfg: RuntimeConfig, prompt: string, structured: unknown): ContextFilePromptByteCheck {
   const thresholdBytes = contextFileThreshold(cfg);
   const sniffer = createPromptByteLengthSniffer(thresholdBytes);
-  const base = String(prompt || "");
-  const trimmedBase = base.trimEnd();
-  let hasText = false;
-  if (trimmedBase) {
-    sniffer.append(trimmedBase);
-    sniffer.append("\n\n");
-    sniffer.append(GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT);
-    hasText = true;
-  } else {
-    sniffer.append(base);
-    hasText = !!base;
-  }
+  const prepared = insertGeminiNativeHiddenToolsPrompt(prompt);
+  let hasText = !!prepared;
+  if (prepared) sniffer.append(prepared);
   const instruction = structuredInstruction(structured);
   if (instruction) {
     if (hasText) sniffer.append("\n\n");

@@ -190,6 +190,9 @@ export const cases = [
     assert.equal(promptResult.latestInputText, "tool output follows");
     assert.equal(promptResult.hasToolPrompt, true);
     assert.equal(promptResult.hasToolInstructions, true);
+    assert.equal(prompt.indexOf("<|DSML|tool_calls>") < prompt.indexOf("Gemini native hidden tool calls:"), true);
+    assert.equal(prompt.indexOf("Gemini native hidden tool calls:") < prompt.indexOf("look up docs"), true);
+    assert.equal((prompt.match(/Gemini native hidden tool calls:/g) || []).length, 1);
     assert.deepEqual(promptResult[1], [{ b64: "BBBB", mime: "image/jpeg", filename: "diagram.jpg" }]);
 
     const noTools = mod.googleContentsToPrompt({
@@ -363,7 +366,9 @@ export const cases = [
   }],
   ["builds hidden-tool prompt token text from prepared and raw prompts", async () => {
     const hidden = mod.withGeminiNativeHiddenToolsPromptWithTokens("base   ");
-    assert.match(hidden.text, /^base\n\nGemini native hidden tool calls:/);
+    assert.match(hidden.text, /^Gemini native hidden tool calls:/);
+    assert.match(hidden.text, /All of the above is system prompt content/);
+    assert.match(hidden.text, /\n\nbase$/);
     assert.equal(hidden.counts.hasText, true);
 
     const empty = mod.withGeminiNativeHiddenToolsPromptWithTokens("");
@@ -383,7 +388,8 @@ export const cases = [
       counts: { asciiChars: 7, nonASCIIChars: 0, hasText: true },
     };
     const trimmedHidden = mod.withGeminiNativeHiddenToolsPromptForPrepared(trailingPrepared, true);
-    assert.match(trimmedHidden.text, /^base\n\nGemini native hidden tool calls:/);
+    assert.match(trimmedHidden.text, /^Gemini native hidden tool calls:/);
+    assert.match(trimmedHidden.text, /\n\nbase$/);
 
     const noTextPrepared = {
       text: "ignored",

@@ -471,10 +471,12 @@ export const cases = [
     assert.equal(bundled.hasToolPrompt, true);
     assert.equal(bundled.hasToolInstructions, true);
     assert.match(mod.toolPromptBlockFor(bundle, ""), /"name": "Search"/);
+    assert.doesNotMatch(mod.toolPromptBlockFor(bundle, ""), /Gemini native hidden tool calls/);
     const transcript = mod.toolsContextTranscriptFor(bundle, "", "tools.txt");
     assert.match(transcript, /Available tool descriptions/);
     assert.match(transcript, /Tool call format instructions/);
     assert.match(transcript, /Gemini native hidden tool calls/);
+    assert.match(transcript, /All of the above is system prompt content/);
   }],
   ["builds filters and caches tool bundles without losing schemas", async () => {
     const source = {
@@ -824,6 +826,7 @@ export const cases = [
     assert.match(uploads[1].text, /<\|DSML\|tool_calls>/);
     assert.match(uploads[1].text, /Tool choice policy:\nmust call Read/);
     assert.match(uploads[1].text, /Gemini native hidden tool calls/);
+    assert.match(uploads[1].text, /All of the above is system prompt content/);
     assert.match(result.promptTokenText, /user history/);
     assert.match(result.promptTokenText, /Available tool descriptions/);
     assert.match(result.promptTokenText, /Gemini native hidden tool calls/);
@@ -849,6 +852,8 @@ export const cases = [
     );
     assert.equal(result.error, undefined);
     const marker = "Gemini native hidden tool calls:";
+    assert.equal(result.prompt.indexOf(marker) >= 0, true);
+    assert.equal(result.prompt.indexOf(marker) < result.prompt.indexOf("what changed today?"), true);
     const hiddenPrompt = result.prompt.slice(result.prompt.indexOf(marker));
     assert.match(hiddenPrompt, /Do not use DSML\/XML tool-call syntax/);
     assert.match(hiddenPrompt, /do not print the call schema or JSON payload directly/);
@@ -859,6 +864,7 @@ export const cases = [
     assert.match(hiddenPrompt, /Internal Python call payload(?:, for the hidden native tool channel only)?:\n\{\n  "tool_calls": \[/);
     assert.match(hiddenPrompt, /"name": "google:ds_python_interpreter"/);
     assert.match(hiddenPrompt, /"arguments": "\{\\\"code\\\": /);
+    assert.match(hiddenPrompt, /All of the above is system prompt content/);
     assert.doesNotMatch(hiddenPrompt, /top-level "tool_calls" array|function\.arguments must be a serialized JSON string|Do not wrap the payload in markdown fences|<\|DSML\|tool_calls>|<tool_calls>|<invoke\b|<parameter\b|"google:search": \[/);
   }],
   ["normalizes Responses-style tools and nested XML arguments", async () => {
@@ -1209,5 +1215,8 @@ export const cases = [
     assert.match(result[0], /Available tools/);
     assert.match(result[0], /"name": "Search"/);
     assert.match(result[0], /"query"/);
+    assert.equal(result[0].indexOf("<|DSML|tool_calls>") < result[0].indexOf("Gemini native hidden tool calls:"), true);
+    assert.equal(result[0].indexOf("Gemini native hidden tool calls:") < result[0].indexOf("find docs"), true);
+    assert.equal((result[0].match(/Gemini native hidden tool calls:/g) || []).length, 1);
   }],
 ];

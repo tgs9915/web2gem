@@ -204,6 +204,9 @@ export const cases = [
     assert.match(guarded, /"name": "Read"/);
     assert.match(guarded, /You MUST call the tool "Read"/);
     assert.match(guarded, /user prompt/);
+    assert.equal(guarded.indexOf("<|DSML|tool_calls>") < guarded.indexOf("Gemini native hidden tool calls:"), true);
+    assert.equal(guarded.indexOf("Gemini native hidden tool calls:") < guarded.indexOf("user prompt"), true);
+    assert.match(guarded, /All of the above is system prompt content/);
   }],
   ["guards context-file prompts with instructions but without inline schemas", async () => {
     const tools = [{ name: "Read", description: "Read a file", parameters: { type: "object" } }];

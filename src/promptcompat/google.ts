@@ -2,7 +2,7 @@ import { imageFilenameFromObject } from "../shared/media";
 import { isRecord, type UnknownRecord } from "../shared/types";
 import { messageContentToPrompt, openAIToolDefs } from "../toolcall/content";
 import { googleAllowedFunctionNames, googleFunctionCallingConfig } from "../toolcall/policy-google";
-import { formatPromptToolCallBlock } from "../toolcall/prompt-format";
+import { GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT, formatPromptToolCallBlock } from "../toolcall/prompt-format";
 import { toolPromptBlockFor } from "../toolcall/tool-bundle";
 import { createPromptPartAccumulator } from "./prompt-text";
 
@@ -46,7 +46,10 @@ export function googleContentsToPrompt(req: unknown, toolDefsOverride: unknown, 
   const promptToolDefs = fcMode !== "NONE"
     ? (Array.isArray(toolDefsOverride) ? toolDefsOverride : openAIToolDefs(request.tools))
     : [];
-  if (promptToolDefs.length) prompt.add(buildGoogleToolPrompt(promptToolDefs, req, toolPromptSource));
+  if (promptToolDefs.length) {
+    prompt.add(buildGoogleToolPrompt(promptToolDefs, req, toolPromptSource));
+    prompt.add(GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT);
+  }
 
   const sysInst = isRecord(request.systemInstruction) ? request.systemInstruction : null;
   if (sysInst && Array.isArray(sysInst.parts)) {

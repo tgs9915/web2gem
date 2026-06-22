@@ -28,12 +28,9 @@ export function structuredInstruction(requirement: unknown): string {
 }
 
 export function withGeminiNativeHiddenToolsPromptWithTokens(prompt: unknown, keepText: boolean = true): PreparedTokenText {
-  const base = String(prompt || "").trimEnd();
-  if (!base) {
-    const text = prompt || "";
-    return buildTextWithTokens([text], keepText);
-  }
-  return buildTextWithTokens([base, "\n\n", GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT], keepText);
+  const text = String(prompt || "");
+  const prepared = insertGeminiNativeHiddenToolsPrompt(text);
+  return buildTextWithTokens([prepared], keepText);
 }
 
 export function appendTextToPreparedWithTokens(prepared: unknown, parts: readonly unknown[] | null | undefined, keepText: boolean = true): PreparedTokenText {
@@ -59,11 +56,15 @@ export function withGeminiNativeHiddenToolsPromptForPrepared(prepared: unknown, 
   const counts = preparedCounts(prepared);
   if (!counts) return withGeminiNativeHiddenToolsPromptWithTokens(preparedText(prepared), keepText);
   if (!counts.hasText) return keepText ? prepared : { ...objectFromPrepared(prepared), text: "" };
-  if (keepText) {
-    const text = String(preparedText(prepared) || "");
-    if (text.trimEnd() !== text) return withGeminiNativeHiddenToolsPromptWithTokens(text, keepText);
-  }
-  return appendTextToPreparedWithTokens(prepared, ["\n\n", GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT], keepText);
+  return withGeminiNativeHiddenToolsPromptWithTokens(preparedText(prepared), keepText);
+}
+
+export function insertGeminiNativeHiddenToolsPrompt(prompt: unknown): string {
+  const text = String(prompt || "");
+  const base = text.trimEnd();
+  if (!base) return text;
+  if (base.includes(GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT)) return text;
+  return GEMINI_NATIVE_HIDDEN_TOOLS_PROMPT + "\n\n" + base;
 }
 
 export function appendStructuredOutputInstructionWithTokens(prompt: unknown, requirement: unknown, keepText: boolean = true): PreparedTokenText {
