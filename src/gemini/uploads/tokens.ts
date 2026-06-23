@@ -1,32 +1,37 @@
-import { extractGeminiAppPageTokens, type GeminiAppPageTokens } from "../app-page";
+import { extractGeminiAppPageTokens, extractGeminiPushId, type GeminiAppPageTokens } from "../app-page";
 import { GEMINI_WEB_USER_AGENT } from "../constants";
 import { httpFetch } from "../transport";
+import { createOriginScopedStringCache } from "../cache";
 import type { RuntimeConfig } from "../../config";
 import { configWithFreshGeminiCookie } from "../cookies";
 import { errorLogSummary, log } from "../../shared/runtime";
+import { contentPushUploadError } from "./errors";
 
 type PageTokens = GeminiAppPageTokens;
 type PageTokenCache = { key: string; tokens: PageTokens | null; ts: number };
 type PageTokenPending = { key: string; promise: Promise<PageTokens> | null };
-export type ContentPushUploadTokens = {
+type ContentPushUploadTokens = {
   pushId: string;
-  pctx: string;
-  usedDefaultPushId: boolean;
-  usedDefaultPctx: boolean;
 };
 
-export const GEMINI_UPLOAD_USER_AGENT = GEMINI_WEB_USER_AGENT;
-export const DEFAULT_CONTENT_PUSH_PUSH_ID = "feeds/mcudyrk2a4khkz";
-export const DEFAULT_CONTENT_PUSH_PCTX = "CgcSBWjK7pYx";
+const GEMINI_UPLOAD_USER_AGENT = GEMINI_WEB_USER_AGENT;
+const GEMINI_PUSH_ID_CACHE_TTL_SEC = 12 * 60 * 60;
 export let _pageTokens: PageTokenCache = { key: "", tokens: null, ts: 0 };
 export let _pageTokensPending: PageTokenPending = { key: "", promise: null };
 
 const PAGE_TOKEN_CACHE_TTL_MS = 600000;
 const EMPTY_PAGE_TOKEN_CACHE_TTL_MS = 30000;
+const pushIdCache = createOriginScopedStringCache({
+  cachePrefix: "https://internal-cache/gemini-push-id/",
+  ttlSec: GEMINI_PUSH_ID_CACHE_TTL_SEC,
+  payloadKey: "push_id",
+  logLabel: "Gemini push_id",
+});
 
 export function resetGeminiUploadCachesForTest(): void {
   _pageTokens = { key: "", tokens: null, ts: 0 };
   _pageTokensPending = { key: "", promise: null };
+  pushIdCache.reset();
 }
 
 export async function getPageTokens(cfg: RuntimeConfig): Promise<PageTokens> {
@@ -56,11 +61,11 @@ export async function getPageTokensForConfig(activeCfg: RuntimeConfig): Promise<
       });
       Object.assign(tokens, await extractGeminiAppPageTokens(resp));
       if (!hasAnyPageToken(tokens)) {
-        log(activeCfg, "gemini app page token markers missing; content-push upload defaults may be used");
+        log(activeCfg, "gemini app page token markers missing; content-push upload unavailable");
       }
     } catch (e) {
       shouldCache = false;
-      log(activeCfg, `gemini app page token fetch failed; content-push upload defaults may be used ${errorLogSummary(e)}`);
+      log(activeCfg, `gemini app page token fetch failed; content-push upload unavailable ${errorLogSummary(e)}`);
     }
     if (shouldCache) _pageTokens = { key: cacheKey, tokens, ts: now };
     return tokens;
@@ -73,22 +78,30 @@ export async function getPageTokensForConfig(activeCfg: RuntimeConfig): Promise<
   }
 }
 
-export function contentPushUploadTokens(tokens: PageTokens | null | undefined): ContentPushUploadTokens {
-  const pushId = tokens && tokens.push_id ? tokens.push_id : DEFAULT_CONTENT_PUSH_PUSH_ID;
-  const pctx = tokens && tokens.pctx ? tokens.pctx : DEFAULT_CONTENT_PUSH_PCTX;
-  return {
-    pushId,
-    pctx,
-    usedDefaultPushId: pushId === DEFAULT_CONTENT_PUSH_PUSH_ID && (!tokens || tokens.push_id !== DEFAULT_CONTENT_PUSH_PUSH_ID),
-    usedDefaultPctx: pctx === DEFAULT_CONTENT_PUSH_PCTX && (!tokens || tokens.pctx !== DEFAULT_CONTENT_PUSH_PCTX),
-  };
+export async function getGeminiPushId(cfg: RuntimeConfig): Promise<string> {
+  const cachedPushId = await getCachedGeminiPushId(cfg);
+  if (cachedPushId) return cachedPushId;
+  return getFreshGeminiPushId(cfg);
 }
 
-export function logContentPushTokenFallback(cfg: RuntimeConfig, protocol: string, tokens: ContentPushUploadTokens, fieldsToReport: ReadonlyArray<"push_id" | "pctx"> = ["push_id", "pctx"]): void {
-  const fields = [];
-  if (fieldsToReport.includes("push_id") && tokens.usedDefaultPushId) fields.push("push_id");
-  if (fieldsToReport.includes("pctx") && tokens.usedDefaultPctx) fields.push("pctx");
-  if (fields.length) log(cfg, `content-push upload using default page token protocol=${protocol} fields=${fields.join(",")}`);
+export async function getCachedGeminiPushId(cfg: RuntimeConfig): Promise<string> {
+  return pushIdCache.getCached(cfg);
+}
+
+export async function setCachedGeminiPushId(cfg: RuntimeConfig, value: string): Promise<void> {
+  await pushIdCache.setCached(cfg, value);
+}
+
+async function getFreshGeminiPushId(cfg: RuntimeConfig): Promise<string> {
+  return pushIdCache.getFresh(cfg, fetchFreshGeminiPushId);
+}
+
+export function contentPushUploadTokens(pushId: string | null | undefined, protocol: string): ContentPushUploadTokens {
+  const value = validGeminiPushId(pushId);
+  if (!value) {
+    throw contentPushUploadError("content_push_missing_page_token", `content-push ${protocol} upload missing Gemini page token: push_id`, { protocol });
+  }
+  return { pushId: value };
 }
 
 function pageTokenCacheTtl(tokens: PageTokens): number {
@@ -96,5 +109,35 @@ function pageTokenCacheTtl(tokens: PageTokens): number {
 }
 
 function hasAnyPageToken(tokens: PageTokens): boolean {
-  return !!(tokens.at || tokens.push_id || tokens.pctx);
+  return !!(tokens.at || tokens.push_id);
+}
+
+function validGeminiPushId(value: unknown): string {
+  const pushId = typeof value === "string" ? value.trim() : "";
+  return pushId ? pushId : "";
+}
+
+async function fetchFreshGeminiPushId(cfg: RuntimeConfig): Promise<string> {
+  const activeCfg = await configWithFreshGeminiCookie(cfg);
+  try {
+    const headers: Record<string, string> = {
+      "User-Agent": GEMINI_UPLOAD_USER_AGENT,
+      "Accept-Language": "en-US,en;q=0.9",
+    };
+    if (activeCfg.cookie) headers["Cookie"] = activeCfg.cookie;
+    const resp = await httpFetch(`${activeCfg.gemini_origin || "https://gemini.google.com"}/app`, {
+      headers,
+      timeoutMs: 30000,
+      socket: activeCfg.upstream_socket,
+      cfg: activeCfg,
+    });
+    const pushId = validGeminiPushId(await extractGeminiPushId(resp));
+    if (!pushId) {
+      log(activeCfg, "gemini app page push_id marker missing; content-push upload unavailable");
+    }
+    return pushId;
+  } catch (e) {
+    log(activeCfg, `gemini app page push_id fetch failed; content-push upload unavailable ${errorLogSummary(e)}`);
+    return "";
+  }
 }

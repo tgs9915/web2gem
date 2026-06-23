@@ -1,6 +1,7 @@
 export type ContentPushUploadErrorCode =
   | "content_push_http_status"
-  | "content_push_invalid_ref";
+  | "content_push_invalid_ref"
+  | "content_push_missing_page_token";
 
 export type ContentPushUploadError = Error & {
   code: ContentPushUploadErrorCode;
@@ -22,15 +23,4 @@ export function validateContentPushFileRef(raw: unknown, protocol: string): stri
     throw contentPushUploadError("content_push_invalid_ref", `invalid ${protocol} file ref: ${fileRef.slice(0, 120)}`, { protocol });
   }
   return fileRef;
-}
-
-export function shouldFallbackToResumable(error: unknown): boolean {
-  if (!isContentPushUploadError(error)) return false;
-  if (error.code !== "content_push_http_status") return false;
-  const status = Number(error.status);
-  return status === 400 || status === 401 || status === 403 || status === 404 || status === 405 || status === 415 || status === 501;
-}
-
-function isContentPushUploadError(error: unknown): error is ContentPushUploadError {
-  return !!error && typeof error === "object" && "code" in error;
 }

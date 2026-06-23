@@ -13,8 +13,7 @@ const PARTIAL_TOOL_PREFIXES = [
 ];
 
 export function hasToolCallSyntaxCandidate(text: unknown): boolean {
-  const source = String(text || "");
-  return hasToolCallMarkupSyntaxCandidate(source) || source.indexOf("```tool_call") >= 0;
+  return hasToolCallMarkupSyntaxCandidate(text);
 }
 
 export function hasToolCallMarkupSyntaxCandidate(text: unknown): boolean {

@@ -16,7 +16,6 @@ export type RuntimeConfig = {
   current_input_file_name: string;
   current_tools_file_name: string;
   generic_file_upload_max_bytes: number;
-  structured_output_stream_mode: string;
   api_keys: string[];
   cookie: string;
   sapisid: string;
@@ -66,11 +65,6 @@ export const CONFIG = {
   CURRENT_INPUT_FILE_NAME: "message.txt",
   CURRENT_TOOLS_FILE_NAME: "tools.txt",
   GENERIC_FILE_UPLOAD_MAX_BYTES: 20 * 1024 * 1024,
-
-  // Reject structured-output streaming by default because this worker can only
-  // validate and canonicalize final JSON after the full model output is known.
-  // Set to "best_effort" to stream with prompt-only guidance.
-  STRUCTURED_OUTPUT_STREAM_MODE: "reject",
 };
 
 // ─── 配置 ──────────────────────────────────────────────────────────────────
@@ -151,7 +145,6 @@ export const CONFIG_ENV_KEYS = [
   "CURRENT_INPUT_FILE_NAME",
   "CURRENT_TOOLS_FILE_NAME",
   "GENERIC_FILE_UPLOAD_MAX_BYTES",
-  "STRUCTURED_OUTPUT_STREAM_MODE",
   "API_KEYS",
 ];
 export let _configCacheKey: string | null = null;
@@ -228,7 +221,6 @@ export function getConfig(env: WorkerEnv = DEFAULT_ENV): RuntimeConfig {
       CONFIG.GENERIC_FILE_UPLOAD_MAX_BYTES,
       0
     ),
-    structured_output_stream_mode: String(envOr(env, "STRUCTURED_OUTPUT_STREAM_MODE", CONFIG.STRUCTURED_OUTPUT_STREAM_MODE) || "reject").trim().toLowerCase(),
     api_keys: parseApiKeys(envOr(env, "API_KEYS", CONFIG.API_KEYS)),
     cookie,
     sapisid,

@@ -266,7 +266,7 @@ export const cases = [
     assert.match(result.prompt, /"name": "Translate"/);
     assert.match(result.prompt, /"text"/);
   }],
-  ["parses Google legacy function-call syntaxes and schema-normalizes string args", async () => {
+  ["keeps Google legacy function-call syntaxes as plain text", async () => {
     const tools = [{
       functionDeclarations: [{
         name: "Lookup",
@@ -283,15 +283,12 @@ export const cases = [
       "before\n```function_call\n{\"name\":\"Lookup\",\"arguments\":{\"id\":\"7\",\"query\":\"alpha\"}}\n```\nafter",
       tools,
     );
-    assert.equal(cleanFence, "before\n\nafter");
-    assert.equal(fenceCalls[0].name, "Lookup");
-    assert.equal(fenceCalls[0].args.id, "7");
-    assert.equal(fenceCalls[0].args.query, "alpha");
+    assert.match(cleanFence, /```function_call/);
+    assert.deepEqual(fenceCalls, []);
 
     const [cleanBare, bareCalls] = mod.parseGoogleFunctionCalls("{\"name\":\"Lookup\",\"input\":{\"id\":\"8\",\"query\":\"beta\"}}", tools);
-    assert.equal(cleanBare, "");
-    assert.equal(bareCalls[0].args.id, "8");
-    assert.equal(bareCalls[0].args.query, "beta");
+    assert.equal(cleanBare, "{\"name\":\"Lookup\",\"input\":{\"id\":\"8\",\"query\":\"beta\"}}");
+    assert.deepEqual(bareCalls, []);
 
     const [_cleanDsml, dsmlCalls] = mod.parseGoogleFunctionCalls(
       "<tool_calls><invoke name=\"Lookup\"><parameter name=\"query\"><term>docs</term></parameter></invoke></tool_calls>",

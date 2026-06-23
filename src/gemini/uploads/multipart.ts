@@ -2,9 +2,10 @@ import type { RuntimeConfig } from "../../config";
 import { joinByteChunks } from "../../attachments/materialize";
 import { sanitizeUploadFilename } from "../../attachments/media";
 import { TEXT_ENCODER } from "../../shared/runtime";
+import { GEMINI_WEB_USER_AGENT } from "../constants";
 import { httpFetch } from "../transport";
 import { contentPushUploadError, validateContentPushFileRef } from "./errors";
-import { contentPushUploadTokens, GEMINI_UPLOAD_USER_AGENT, getPageTokensForConfig, logContentPushTokenFallback } from "./tokens";
+import { contentPushUploadTokens, getGeminiPushId } from "./tokens";
 
 export type UploadBytesInput = {
   bytes: Uint8Array;
@@ -15,16 +16,14 @@ export type UploadBytesInput = {
 const MULTIPART_UPLOAD_ENDPOINT = "https://content-push.googleapis.com/upload";
 
 export async function uploadMultipartFile(cfg: RuntimeConfig, input: UploadBytesInput): Promise<string> {
-  const pageTokens = await getPageTokensForConfig(cfg);
-  const tokens = contentPushUploadTokens(pageTokens);
-  logContentPushTokenFallback(cfg, "multipart", tokens, ["push_id"]);
+  const tokens = contentPushUploadTokens(await getGeminiPushId(cfg), "multipart");
   const multipart = buildMultipartFileBody(input);
   const headers: Record<string, string> = {
     "Origin": "https://gemini.google.com",
     "Referer": "https://gemini.google.com/",
     "X-Tenant-Id": "bard-storage",
     "Push-ID": tokens.pushId,
-    "User-Agent": GEMINI_UPLOAD_USER_AGENT,
+    "User-Agent": GEMINI_WEB_USER_AGENT,
     "Content-Type": multipart.contentType,
   };
   const response = await httpFetch(MULTIPART_UPLOAD_ENDPOINT, {

@@ -1,12 +1,2 @@
-export { base64ToBytes, filenameFromUrl, firstNonEmptyString, genericFilenameFromMime, imageFilenameFromMime, imageFilenameFromObject, mimeFromFilename, normalizeUploadFileInput, parseDataUrl, parseImageUrl, parseUploadUrl, sanitizeUploadFilename, uploadFilenameFromObject, uploadMimeFromObject } from "../../attachments/media";
-export { collectOpenAIInlineUploadFiles, collectOpenAIInlineUploadImages, collectOpenAIRequestAttachmentPlan } from "../../attachments/collect-openai";
-export { droppedAttachmentNote } from "../../attachments/notes";
-export { createAttachmentPlan, MAX_ATTACHMENTS_PER_REQUEST } from "../../attachments/plan";
-export { collectOpenAIRefFileIDs } from "../../attachments/refs";
-export { joinByteChunks as _joinAttachmentByteChunks } from "../../attachments/materialize";
-export { buildMultipartFileBody, uploadMultipartFile } from "./multipart";
-export { shouldFallbackToResumable, validateContentPushFileRef } from "./errors";
-export { uploadResumableFile } from "./resumable";
 export { resolveAttachments, uploadTextFile } from "./execute";
 export { getPageTokens, resetGeminiUploadCachesForTest } from "./tokens";
-export type { AttachmentPlan, AttachmentUploadResult } from "../../attachments/types";

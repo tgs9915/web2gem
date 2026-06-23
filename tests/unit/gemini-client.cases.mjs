@@ -1,26 +1,5 @@
 import assert from "./assertions.js";
-import { mod, withCaches, withConsoleLog, withFetch } from "./helpers.js";
-
-function createMemoryCache() {
-  const store = new Map();
-  const stats = { match: 0, put: 0, delete: 0 };
-  return {
-    stats,
-    async match(request) {
-      stats.match += 1;
-      const response = store.get(request.url);
-      return response ? response.clone() : undefined;
-    },
-    async put(request, response) {
-      stats.put += 1;
-      store.set(request.url, response.clone());
-    },
-    async delete(request) {
-      stats.delete += 1;
-      return store.delete(request.url);
-    },
-  };
-}
+import { createMemoryCache, mod, withCaches, withConsoleLog, withFetch } from "./helpers.js";
 
 function wrbLine(texts) {
   const inner = [
@@ -985,14 +964,14 @@ export const cases = [
       promptText: "",
       droppedNote: "",
       supportsFileRefs: false,
-      usage: { uploadedFiles: 0, dedupedFiles: 0, uploadedBytes: 0, fileRefBytes: 0, inlinedFiles: 0, inlinedBytes: 0, droppedFiles: 0, multipartUploads: 0, resumableFallbacks: 0 },
+      usage: { uploadedFiles: 0, dedupedFiles: 0, uploadedBytes: 0, fileRefBytes: 0, inlinedFiles: 0, inlinedBytes: 0, droppedFiles: 0, multipartUploads: 0 },
     });
 
     const calls = [];
     await withFetch(async (url, init) => {
       calls.push({ url: String(url), body: init && init.body });
       if (String(url) === "https://gemini.example/app") {
-        return new Response("<html></html>", { status: 200 });
+        return new Response('{"qKIAYe":"push-provider"}', { status: 200 });
       }
       if (String(url) === "https://content-push.googleapis.com/upload") {
         assert.equal(init.method, "POST");

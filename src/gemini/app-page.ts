@@ -1,4 +1,4 @@
-export type GeminiAppPageTokens = { push_id?: string; pctx?: string; at?: string };
+export type GeminiAppPageTokens = { push_id?: string; at?: string };
 
 type TextStreamResponse = {
   body?: ReadableStream<Uint8Array> | null;
@@ -8,9 +8,9 @@ type QuotedMarkerSpec<K extends string> = { key: K; marker: string };
 
 const APP_PAGE_TOKEN_MARKERS: Array<QuotedMarkerSpec<keyof GeminiAppPageTokens>> = [
   { key: "push_id", marker: '"qKIAYe":"' },
-  { key: "pctx", marker: '"Ylro7b":"' },
   { key: "at", marker: '"SNlM0e":"' },
 ];
+const PUSH_ID_MARKER: QuotedMarkerSpec<"push_id"> = { key: "push_id", marker: '"qKIAYe":"' };
 const CFB2H_MARKER = '"cfb2h":"';
 const BUILD_LABEL_PREFIX = "boq_assistant-bard-web-server_";
 const BUILD_LABEL_KEEP_CHARS = BUILD_LABEL_PREFIX.length + 128;
@@ -22,6 +22,15 @@ export async function extractGeminiAppPageTokens(resp: TextStreamResponse): Prom
     return scanner.done;
   });
   return scanner.result;
+}
+
+export async function extractGeminiPushId(resp: TextStreamResponse): Promise<string> {
+  const scanner = createQuotedMarkerScanner([PUSH_ID_MARKER]);
+  await scanResponseText(resp, (chunk) => {
+    scanner.push(chunk);
+    return scanner.done;
+  });
+  return scanner.result.push_id || "";
 }
 
 export async function extractGeminiBuildLabel(resp: TextStreamResponse): Promise<string> {

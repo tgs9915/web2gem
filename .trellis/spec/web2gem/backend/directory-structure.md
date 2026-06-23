@@ -16,7 +16,7 @@
 - `src/gemini/transport/socket.ts` is the public socket transport facade. If the socket implementation is decomposed, keep public exports compatible from this module and move internals into owner modules under `src/gemini/transport/`.
 - `src/gemini/completion-provider.ts` is the Gemini adapter for `src/completion/ports.ts`. It may import completion port types; other Gemini implementation modules should not depend on completion business modules.
 - `src/shared/` must stay leaf-level and provider-neutral.
-- `src/shared/media.ts` is a compatibility re-export only. Implementation modules must import media and attachment helpers from `src/attachments/**` directly.
+- Media and attachment helpers live under `src/attachments/**`; do not add compatibility shims under `src/shared/`.
 - `scripts/docker-server.mjs` adapts Node HTTP requests to the Worker `fetch` entrypoint. Do not duplicate route, auth, completion, or provider logic in the Docker server path.
 
 ## Provider Ports and Stream Events
@@ -99,7 +99,7 @@ Use this contract when changing OpenAI/Google file or image input handling, requ
 ### 3. Contracts
 
 - `src/attachments/**` is provider-neutral and may depend on `src/shared/**`, but must not import `src/gemini/**`, HTTP adapters, or completion modules.
-- Implementation modules must import attachment media helpers from `src/attachments/media`, not from the legacy `src/shared/media.ts` compatibility shim.
+- Implementation modules must import attachment media helpers from `src/attachments/media`.
 - `src/completion/**` must call provider ports for upload and must not import Gemini upload modules.
 - `src/gemini/uploads/**` owns Gemini Web upload protocol details. Preferred content-push upload is multipart and must not include Gemini cookie or SAPISID authorization headers.
 - Request-local candidate dedupe is scoped to one request and keyed by MIME/content type, filename, and bytes.
@@ -110,23 +110,21 @@ Use this contract when changing OpenAI/Google file or image input handling, requ
 - Invalid base64/data URL request-local attachment -> continue as text-only with deterministic prompt note.
 - Remote `http://` / `https://` URLs are not upload sources. Match `ds2api`: only inline base64/data URL payloads are materialized for request-local upload.
 - Explicit file inputs that provide only a remote URL and no existing file reference -> continue as text-only with deterministic invalid-file prompt note; do not fetch the URL.
-- Preferred multipart upload rejection -> attempt isolated resumable fallback only for explicit content-push protocol/auth-style HTTP statuses: `400`, `401`, `403`, `404`, `405`, `415`, or `501`.
-- Preferred multipart invalid file refs, ambiguous exceptions without a status, network-like failures, aborts, and local validation failures -> do not auth fallback; request-local attachments degrade with a deterministic prompt note and required context-file uploads fail.
-- Resumable fallback failure for request-local attachment -> continue with deterministic prompt note.
+- Preferred multipart upload rejection, invalid multipart file refs, ambiguous exceptions without a status, network-like failures, aborts, and local validation failures -> do not auth fallback; request-local attachments degrade with a deterministic prompt note and required context-file uploads fail.
+- Resumable upload is not part of the current upload fallback path; do not reintroduce cookie-backed auth fallback without a spec update and explicit user-facing security review.
 - Required large-context text upload failure -> return `large_context_file_upload_failed`; do not fall back to oversized inline context.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: prompt conversion emits markers, attachment planning owns candidates/refs, completion calls `resolveAttachments(plan)`, and Gemini adapter executes the plan.
-- Base: `src/shared/media.ts` may remain a compatibility re-export, but parsing logic belongs under `src/attachments/`.
 - Bad: `src/completion/context.ts` imports `src/gemini/uploads`.
-- Bad: implementation modules import `src/shared/media.ts` instead of the `src/attachments/media` owner.
+- Bad: implementation modules import media helpers from any `src/shared` compatibility shim instead of the `src/attachments/media` owner.
 - Bad: adding a second resolver path for images or files outside `AttachmentPlan`.
 - Bad: sending `Cookie` or `Authorization` to `https://content-push.googleapis.com/upload` on the preferred multipart path.
 
 ### 6. Tests Required
 
-- Unit tests for attachment planning, max count, existing ref consolidation, dedupe, invalid base64, remote URL non-fetch behavior, multipart request construction, fallback resumable auth headers, upload protocol telemetry, and final file-ref ordering.
+- Unit tests for attachment planning, max count, existing ref consolidation, dedupe, invalid base64, remote URL non-fetch behavior, multipart request construction, upload failure degradation, upload protocol telemetry, and final file-ref ordering.
 - HTTP/context tests should assert provider handoff through `resolveAttachments(plan)`, not `resolveImages` / `resolveFiles`.
 - Run `pnpm typecheck`, `pnpm check:arch`, `pnpm unit`, and `pnpm smoke`.
 
@@ -451,12 +449,12 @@ Use this contract when changing non-streaming tool-call parsing, streamed tool-c
 
 ### 3. Contracts
 
-- A text is a markup tool-call candidate only when it contains a tag-shaped accepted tool prefix such as `<tool_calls`, `<|DSML|tool_calls`, `<invoke`, `<parameter`, accepted fullwidth/confusable equivalents, accepted prefixed legacy forms, or the legacy fenced marker ```tool_call`.
+- A text is a markup tool-call candidate only when it contains a tag-shaped accepted tool prefix such as `<tool_calls`, `<|DSML|tool_calls`, `<invoke`, `<parameter`, accepted fullwidth/confusable equivalents, or accepted prefixed legacy forms. Legacy fenced markers such as ```tool_call are plain text and must not trigger tool-call parsing.
 - Ordinary prose such as `a < b and parameterless text` must not enter full DSML/XML parsing just because it contains `<` and a tool-like substring.
 - Streamed tool-call sieve may hold true partial prefixes across chunks, for example `<|DS`, but must release the buffer once later text proves the prefix is not a valid partial tool tag.
-- DSML parser compatibility remains permissive after the probe admits a candidate: accepted legacy XML, confusable delimiters, DSML aliases, protected Markdown handling, and schema normalization must continue in the parser/formatter modules.
+- DSML parser compatibility remains permissive after the probe admits a candidate: accepted XML tag aliases, confusable delimiters, DSML aliases, protected Markdown handling, and schema normalization must continue in the parser/formatter modules.
 - Prompt/history formatters must emit the DSML-prefixed form (`<|DSML|tool_calls>`, `<|DSML|invoke>`, `<|DSML|parameter>`) rather than generating legacy `<tool_calls>` tags. Parsers may continue accepting legacy tags as input compatibility.
-- Malformed legacy fenced tool-call blocks must remain visible as plain text instead of being stripped from the model output without producing a tool call.
+- Legacy fenced tool-call blocks must remain visible as plain text instead of being stripped from the model output or producing a tool call.
 
 ### 4. Validation & Error Matrix
 

@@ -33,7 +33,6 @@ const CFG = {
   current_input_file_min_bytes: 95000,
   current_input_file_name: "message.txt",
   current_tools_file_name: "tools.txt",
-  structured_output_stream_mode: "reject",
   api_keys: [],
   cookie: "",
   sapisid: "",
@@ -85,7 +84,7 @@ const structuredPatternRequirement = {
   },
 };
 const base64Input = Buffer.from(makeBytes(BASE64_BYTES)).toString("base64");
-const appPageTokensHtml = makeAppHtml(APP_HTML_BYTES, '{"qKIAYe":"push-bench","Ylro7b":"pctx-bench","SNlM0e":"at-bench"}');
+const appPageTokensHtml = makeAppHtml(APP_HTML_BYTES, '{"qKIAYe":"push-bench","SNlM0e":"at-bench"}');
 const appBuildLabelHtml = makeAppHtml(APP_HTML_BYTES, '<script>{"cfb2h":"bench-bl"}</script>');
 const structuredJsonNoise = "{".repeat(STRUCTURED_JSON_NOISE_BYTES);
 const markdownRestoreMasked = mod.maskMarkdownProtectedSpans(makeMarkdownProtectedText(300));
@@ -588,7 +587,7 @@ async function runAppPageTokensLarge() {
         htmlBytes: stats.bytes,
         pulls: stats.pulls,
         canceled: stats.canceled,
-        ok: tokens.push_id === "push-bench" && tokens.pctx === "pctx-bench" && tokens.at === "at-bench" ? 1 : 0,
+        ok: tokens.push_id === "push-bench" && tokens.at === "at-bench" ? 1 : 0,
       },
     };
   } finally {

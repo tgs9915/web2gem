@@ -3,17 +3,19 @@ import { sseResponse } from "../core/sse";
 import { EMPTY_UPSTREAM_MSG, runCompletionText, upstreamEmptyWarning } from "../../completion";
 import type { CompletionProvider } from "../../completion";
 import { prepareOpenAICompletion } from "../../completion/openai";
-import { normalizeResponsesInputAsMessages } from "../../promptcompat/responses-input";
+import { normalizeResponsesInputAsMessagesStrict } from "../../promptcompat/responses-input";
 import { elapsedMs, errorLogSummary, log, logStage, nowMs, nowSec, randHex, upstreamErrorCode, upstreamErrorMessage } from "../../shared/runtime";
 import { openAIErrorResponse, openAIUpstreamErrorResponse } from "./errors";
 import { buildResponsesOutput, finalizeOpenAICompletionResult, openAIResponsesUsage } from "./format";
 import { streamResponsesWithToolSieve, writeResponsesEvent } from "./responses-stream";
 import type { RuntimeConfig } from "../../config";
 
-// POST /v1/responses(Codex CLI 用)
+  // POST /v1/responses(Codex CLI 用)
 export async function handleResponses(req: Record<string, unknown> | undefined, cfg: RuntimeConfig, provider: CompletionProvider) {
   if (!req) return openAIErrorResponse("request body must be a JSON object", 400);
-  const messages = normalizeResponsesInputAsMessages(req);
+  const normalized = normalizeResponsesInputAsMessagesStrict(req);
+  if (normalized.error) return openAIErrorResponse(normalized.error, 400, "unsupported_responses_input");
+  const messages = normalized.messages;
 
   const logRequests = !!cfg.log_requests;
   const prepareStart = logRequests ? nowMs() : 0;
@@ -39,7 +41,7 @@ export async function handleResponses(req: Record<string, unknown> | undefined, 
   }
   const tools = filteredTools;
 
-  if (req.stream && structured && cfg.structured_output_stream_mode !== "best_effort") {
+  if (req.stream && structured) {
     return openAIErrorResponse("response_format with stream is not supported by this worker because final JSON cannot be validated while streaming", 400, "unsupported_response_format_stream");
   }
 

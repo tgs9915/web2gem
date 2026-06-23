@@ -37,7 +37,7 @@ export async function handleChat(req: UnknownRecord, cfg: RuntimeConfig, provide
   }
 
   const stream = !!req.stream;
-  if (stream && structured && cfg.structured_output_stream_mode !== "best_effort") {
+  if (stream && structured) {
     return openAIErrorResponse("response_format with stream is not supported by this worker because final JSON cannot be validated while streaming", 400, "unsupported_response_format_stream");
   }
   const cid = `chatcmpl-${randHex(12)}`;

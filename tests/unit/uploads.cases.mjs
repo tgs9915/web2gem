@@ -1,5 +1,5 @@
 import assert from "./assertions.js";
-import { mod, withConsoleLog, withFetch, withPatchedGlobal } from "./helpers.js";
+import { createMemoryCache, mod, withCaches, withConsoleLog, withFetch, withPatchedGlobal } from "./helpers.js";
 
 export const suiteName = "uploads";
 export const cases = [
@@ -52,6 +52,111 @@ export const cases = [
       "https://content-push.googleapis.com/upload",
     ]);
   }],
+  ["caches Gemini push IDs in the Workers cache API", async () => {
+    mod.resetActiveGeminiCookieForTest();
+    mod.resetGeminiUploadCachesForTest();
+    const cfg = baseUploadCfg({ cookie: "__Secure-1PSID=psid" });
+    const cache = createMemoryCache();
+    await withCaches(cache, async () => {
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "");
+      await mod.setCachedGeminiPushId(cfg, "push-cached");
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "push-cached");
+      assert.equal(cache.stats.match, 1);
+
+      mod.resetGeminiUploadCachesForTest();
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "push-cached");
+      assert.equal(cache.stats.match, 2);
+    });
+  }],
+  ["persists Gemini push IDs with waitUntil when available", async () => {
+    mod.resetActiveGeminiCookieForTest();
+    mod.resetGeminiUploadCachesForTest();
+    const cfg = baseUploadCfg({ cookie: "__Secure-1PSID=psid" });
+    const cache = createMemoryCache();
+    const pending = [];
+    await withCaches(cache, async () => {
+      await mod.setCachedGeminiPushId({
+        ...cfg,
+        execution_ctx: {
+          waitUntil(promise) {
+            pending.push(promise);
+          },
+        },
+      }, "push-waituntil");
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "push-waituntil");
+      assert.equal(cache.stats.match, 0);
+      assert.equal(pending.length, 1);
+      await Promise.all(pending);
+      assert.equal(cache.stats.put, 1);
+    });
+  }],
+  ["drops stale cached Gemini push IDs", async () => {
+    mod.resetActiveGeminiCookieForTest();
+    mod.resetGeminiUploadCachesForTest();
+    const cfg = baseUploadCfg();
+    const cache = createMemoryCache();
+    await cache.put(
+      new Request(`https://internal-cache/gemini-push-id/${encodeURIComponent("https://gemini.example")}`),
+      new Response(JSON.stringify({
+        push_id: "stale-push-id",
+        created_at_ms: Date.now() - 13 * 60 * 60 * 1000,
+      })),
+    );
+    await withCaches(cache, async () => {
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "");
+      assert.equal(await mod.getCachedGeminiPushId(cfg), "");
+      assert.equal(cache.stats.delete, 1);
+    });
+  }],
+  ["refreshes Gemini push IDs once for concurrent callers", async () => {
+    mod.resetActiveGeminiCookieForTest();
+    mod.resetGeminiUploadCachesForTest();
+    const cfg = baseUploadCfg({ cookie: "SID=ok" });
+    const cache = createMemoryCache();
+    let calls = 0;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    await withCaches(cache, async () => {
+      await withFetch(async (url, init = {}) => {
+        calls += 1;
+        assert.equal(String(url), "https://gemini.example/app");
+        assert.equal(init.headers.Cookie, "SID=ok");
+        await gate;
+        return new Response('{"qKIAYe":"push-fresh"}', { status: 200 });
+      }, async () => {
+        const first = mod.getGeminiPushId(cfg);
+        const second = mod.getGeminiPushId(cfg);
+        release();
+        assert.deepEqual(await Promise.all([first, second]), ["push-fresh", "push-fresh"]);
+        assert.equal(calls, 1);
+        assert.equal(await mod.getCachedGeminiPushId(cfg), "push-fresh");
+      });
+    });
+  }],
+  ["uses cached Gemini push ID for multipart uploads without fetching the app page", async () => {
+    mod.resetActiveGeminiCookieForTest();
+    mod.resetGeminiUploadCachesForTest();
+    const cache = createMemoryCache();
+    const requests = [];
+    await withCaches(cache, async () => {
+      await mod.setCachedGeminiPushId(baseUploadCfg(), "push-upload-cache");
+      mod.resetGeminiUploadCachesForTest();
+      await withFetch(async (url, init = {}) => {
+        const href = String(url);
+        requests.push(href);
+        if (href === "https://content-push.googleapis.com/upload") {
+          assertPreferredMultipart(init, { filename: "message.txt", mime: "text/plain; charset=utf-8", bodyText: "hello" });
+          assert.equal(init.headers["Push-ID"], "push-upload-cache");
+          return new Response("/uploaded/cached-text-ref", { status: 200 });
+        }
+        throw new Error(`unexpected fetch ${href}`);
+      }, async () => {
+        const ref = await mod.uploadTextFile(baseUploadCfg({ cookie: "__Secure-1PSID=psid" }), "hello", "message.txt");
+        assert.deepEqual(ref, { ref: "/uploaded/cached-text-ref", name: "message.txt" });
+      });
+    });
+    assert.deepEqual(requests, ["https://content-push.googleapis.com/upload"]);
+  }],
   ["does not cache page-token fetch failures as successful empty token results", async () => {
     mod.resetActiveGeminiCookieForTest();
     mod.resetGeminiUploadCachesForTest();
@@ -69,24 +174,22 @@ export const cases = [
     });
     assert.equal(appCalls, 2);
   }],
-  ["logs default content-push token fallback when app page markers are missing", async () => {
+  ["rejects content-push upload when app page markers are missing", async () => {
     mod.resetActiveGeminiCookieForTest();
     mod.resetGeminiUploadCachesForTest();
     const logs = [];
-    await withConsoleLog((line) => logs.push(String(line)), () => withFetch(async (url, init = {}) => {
+    await withConsoleLog((line) => logs.push(String(line)), () => withFetch(async (url) => {
       const href = String(url);
       if (href === "https://gemini.example/app") return new Response("no token markers", { status: 200 });
-      if (href === "https://content-push.googleapis.com/upload") {
-        assert.equal(init.headers["Push-ID"], "feeds/mcudyrk2a4khkz");
-        return new Response("/uploaded/default-token-ref", { status: 200 });
-      }
       throw new Error(`unexpected fetch ${href}`);
     }, async () => {
-      const ref = await mod.uploadTextFile(baseUploadCfg({ cookie: "__Secure-1PSID=psid", log_requests: true }), "hello", "message.txt");
-      assert.deepEqual(ref, { ref: "/uploaded/default-token-ref", name: "message.txt" });
+      await assert.rejects(
+        () => mod.uploadTextFile(baseUploadCfg({ cookie: "__Secure-1PSID=psid", log_requests: true }), "hello", "message.txt"),
+        /missing Gemini page token/
+      );
     }));
-    assert.equal(logs.some((line) => line.includes("app page token markers missing")), true);
-    assert.equal(logs.some((line) => line.includes("content-push upload using default page token") && line.includes("fields=push_id")), true);
+    assert.equal(logs.some((line) => line.includes("app page push_id marker missing")), true);
+    assert.equal(logs.some((line) => line.includes("default page token")), false);
   }],
   ["degrades anonymous images instead of passing file refs to generation", async () => {
     mod.resetActiveGeminiCookieForTest();
@@ -149,43 +252,29 @@ export const cases = [
     });
     assert.equal(uploadCalls, 1);
   }],
-  ["falls back to isolated resumable upload when multipart is rejected by protocol", async () => {
+  ["does not auth fallback when multipart is rejected by protocol", async () => {
     mod.resetActiveGeminiCookieForTest();
     mod.resetGeminiUploadCachesForTest();
     const seen = [];
     await withFetch(async (url, init = {}) => {
       const href = String(url);
       seen.push({ href, init });
-      if (href === "https://gemini.example/app") return new Response('{"qKIAYe":"push-fallback","Ylro7b":"pctx-fallback"}', { status: 200 });
+      if (href === "https://gemini.example/app") return new Response('{"qKIAYe":"push-fallback"}', { status: 200 });
       if (href === "https://content-push.googleapis.com/upload") {
         assert.equal(init.headers.Cookie, undefined);
         assert.equal(init.headers.Authorization, undefined);
         return new Response("unsupported media type", { status: 415 });
       }
-      if (href === "https://content-push.googleapis.com/upload/") {
-        assert.equal(init.headers.Cookie, "__Secure-1PSID=psid; SAPISID=sapi");
-        assert.match(init.headers.Authorization, /^SAPISIDHASH /);
-        assert.equal(init.headers["X-Goog-Upload-Header-Content-Type"], "text/plain; charset=utf-8");
-        return new Response("", { status: 200, headers: { "x-goog-upload-url": "https://upload.example/finalize" } });
-      }
-      if (href === "https://upload.example/finalize") {
-        assert.equal(init.headers["X-Goog-Upload-Command"], "upload, finalize");
-        assert.equal(new TextDecoder().decode(init.body), "fallback text");
-        return new Response("/uploaded/fallback-text", { status: 200 });
-      }
       throw new Error(`unexpected fetch ${href}`);
     }, async () => {
-      const ref = await mod.uploadTextFile(baseUploadCfg({
+      await assert.rejects(() => mod.uploadTextFile(baseUploadCfg({
         cookie: "__Secure-1PSID=psid; SAPISID=sapi",
         sapisid: "sapi",
-      }), "fallback text", "message.txt");
-      assert.deepEqual(ref, { ref: "/uploaded/fallback-text", name: "message.txt" });
+      }), "fallback text", "message.txt"), /multipart upload failed with HTTP 415/);
     });
     assert.deepEqual(seen.map((item) => item.href), [
       "https://gemini.example/app",
       "https://content-push.googleapis.com/upload",
-      "https://content-push.googleapis.com/upload/",
-      "https://upload.example/finalize",
     ]);
   }],
   ["does not send auth fallback after multipart returns an invalid file ref", async () => {
@@ -455,7 +544,6 @@ export const cases = [
       assert.equal(result.usage.uploadedFiles, 1);
       assert.equal(result.usage.dedupedFiles, 1);
       assert.equal(result.usage.multipartUploads, 1);
-      assert.equal(result.usage.resumableFallbacks, 0);
     }));
     const stageLog = logs.find((line) => line.includes("stage=attachment_upload")) || "";
     assert.match(stageLog, /candidates=2/);
@@ -463,26 +551,17 @@ export const cases = [
     assert.match(stageLog, /dedupedFiles=1/);
     assert.match(stageLog, /uploadedBytes=5/);
     assert.match(stageLog, /multipartUploads=1/);
-    assert.match(stageLog, /resumableFallbacks=0/);
   }],
-  ["logs resumable fallback counts for request-local attachments", async () => {
+  ["logs multipart rejection as dropped request-local attachment", async () => {
     mod.resetActiveGeminiCookieForTest();
     mod.resetGeminiUploadCachesForTest();
     const logs = [];
     await withConsoleLog((line) => logs.push(String(line)), () => withFetch(async (url, init = {}) => {
       const href = String(url);
-      if (href === "https://gemini.example/app") return new Response('{"qKIAYe":"push-log-fallback","Ylro7b":"pctx-log-fallback"}', { status: 200 });
+      if (href === "https://gemini.example/app") return new Response('{"qKIAYe":"push-log-fallback"}', { status: 200 });
       if (href === "https://content-push.googleapis.com/upload") {
         assertPreferredMultipart(init, { filename: "fallback.txt", mime: "text/plain", bodyText: "hello" });
         return new Response("unsupported media type", { status: 415 });
-      }
-      if (href === "https://content-push.googleapis.com/upload/") {
-        assert.equal(init.headers.Cookie, "__Secure-1PSID=psid; SAPISID=sapi");
-        assert.match(init.headers.Authorization, /^SAPISIDHASH /);
-        return new Response("", { status: 200, headers: { "x-goog-upload-url": "https://upload.example/log-fallback-finalize" } });
-      }
-      if (href === "https://upload.example/log-fallback-finalize") {
-        return new Response("/uploaded/log-fallback-ref", { status: 200 });
       }
       throw new Error(`unexpected fetch ${href}`);
     }, async () => {
@@ -491,13 +570,15 @@ export const cases = [
         sapisid: "sapi",
         log_requests: true,
       }), [{ b64: "aGVsbG8=", mime: "text/plain", filename: "fallback.txt" }]);
-      assert.equal(result.usage.uploadedFiles, 1);
+      assert.equal(result.fileRefs, null);
+      assert.match(result.droppedNote, /attachment upload failed/);
+      assert.equal(result.usage.uploadedFiles, 0);
       assert.equal(result.usage.multipartUploads, 0);
-      assert.equal(result.usage.resumableFallbacks, 1);
+      assert.equal(result.usage.droppedFiles, 1);
     }));
     const stageLog = logs.find((line) => line.includes("stage=attachment_upload")) || "";
     assert.match(stageLog, /multipartUploads=0/);
-    assert.match(stageLog, /resumableFallbacks=1/);
+    assert.match(stageLog, /droppedFiles=1/);
   }],
 ];
 

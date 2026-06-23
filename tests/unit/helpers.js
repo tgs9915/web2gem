@@ -66,7 +66,6 @@ export function attachmentResult(overrides = {}) {
       inlinedBytes: 0,
       droppedFiles: overrides.droppedNote ? 1 : 0,
       multipartUploads: 0,
-      resumableFallbacks: 0,
     },
   };
 }
@@ -81,7 +80,6 @@ export function baseConfig(overrides = {}) {
     generic_file_upload_max_bytes: 20 * 1024 * 1024,
     cookie: "",
     log_requests: false,
-    structured_output_stream_mode: "reject",
     ...overrides,
   };
 }
@@ -131,6 +129,27 @@ export async function withFetch(fn, run) {
 
 export async function withCaches(cache, run) {
   return withPatchedGlobal("caches", { default: cache }, run);
+}
+
+export function createMemoryCache() {
+  const store = new Map();
+  const stats = { match: 0, put: 0, delete: 0 };
+  return {
+    stats,
+    async match(request) {
+      stats.match += 1;
+      const response = store.get(request.url);
+      return response ? response.clone() : undefined;
+    },
+    async put(request, response) {
+      stats.put += 1;
+      store.set(request.url, response.clone());
+    },
+    async delete(request) {
+      stats.delete += 1;
+      return store.delete(request.url);
+    },
+  };
 }
 
 export async function withConsoleLog(fn, run) {

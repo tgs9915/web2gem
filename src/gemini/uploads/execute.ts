@@ -6,9 +6,7 @@ import { chooseUploadMime, firstNonEmptyString, genericFilenameFromMime, imageFi
 import type { AttachmentCandidate, AttachmentDrop, AttachmentFileRef, AttachmentPlan, AttachmentUploadResult, AttachmentUsage } from "../../attachments/types";
 import { TEXT_ENCODER, UTF8_FATAL_DECODER, errorLogSummary, log, logStage } from "../../shared/runtime";
 import { configWithFreshGeminiCookie } from "../cookies";
-import { shouldFallbackToResumable } from "./errors";
 import { uploadMultipartFile, type UploadBytesInput } from "./multipart";
-import { uploadResumableFile } from "./resumable";
 
 const MAX_PARALLEL_UPLOADS = 4;
 
@@ -31,10 +29,9 @@ type UploadState = {
   inlinedFiles: number;
   inlinedBytes: number;
   multipartUploads: number;
-  resumableFallbacks: number;
 };
 
-type UploadProtocol = "multipart" | "resumable";
+type UploadProtocol = "multipart";
 
 type UploadBytesResult = {
   ref: string;
@@ -59,7 +56,6 @@ export async function resolveAttachments(cfg: RuntimeConfig, plan: AttachmentPla
     inlinedFiles: 0,
     inlinedBytes: 0,
     multipartUploads: 0,
-    resumableFallbacks: 0,
   };
   const limits = attachmentLimitsFromConfig(activeCfg);
   const uploadResults = await mapWithConcurrency(
@@ -95,7 +91,6 @@ export async function resolveAttachments(cfg: RuntimeConfig, plan: AttachmentPla
     inlinedBytes: state.inlinedBytes,
     droppedFiles: drops.length,
     multipartUploads: state.multipartUploads,
-    resumableFallbacks: state.resumableFallbacks,
   };
   if (activeCfg.log_requests) {
     logStage(activeCfg, "attachment_upload", {
@@ -109,7 +104,6 @@ export async function resolveAttachments(cfg: RuntimeConfig, plan: AttachmentPla
       inlinedBytes: usage.inlinedBytes,
       droppedFiles: usage.droppedFiles,
       multipartUploads: usage.multipartUploads,
-      resumableFallbacks: usage.resumableFallbacks,
       supportsFileRefs,
     });
   }
@@ -173,12 +167,8 @@ async function uploadBytesWithFallbackResult(cfg: RuntimeConfig, input: UploadBy
   try {
     return { ref: await uploadMultipartFile(cfg, input), protocol: "multipart" };
   } catch (e) {
-    if (!shouldFallbackToResumable(e)) {
-      log(cfg, `multipart upload failed without resumable fallback ${errorLogSummary(e)}`);
-      throw e;
-    }
-    log(cfg, `multipart upload rejected; falling back to resumable upload ${errorLogSummary(e)}`);
-    return { ref: await uploadResumableFile(cfg, input), protocol: "resumable" };
+    log(cfg, `multipart upload failed ${errorLogSummary(e)}`);
+    throw e;
   }
 }
 
@@ -221,8 +211,7 @@ async function uploadOneRequestAttachment(cfg: RuntimeConfig, candidate: Attachm
     state.uploadedByKey.set(key, fileRef);
     state.uploadedFiles += 1;
     state.uploadedBytes += materialized.bytes.byteLength;
-    if (uploaded.protocol === "resumable") state.resumableFallbacks += 1;
-    else state.multipartUploads += 1;
+    state.multipartUploads += 1;
     return { candidate, fileRef, promptText: "", drop: null, bytesLength: materialized.bytes.byteLength, deduped: false };
   } catch (e) {
     const code = dropCodeFromError(candidate, e);

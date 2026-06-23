@@ -36,7 +36,6 @@ RULES:
 12) Do NOT wrap XML in markdown fences. Do NOT output explanations, role markers, or internal monologue.
 13) If you call a tool, the first non-whitespace characters of that tool block must be exactly <|DSML|tool_calls>.
 14) Never omit the opening <|DSML|tool_calls> tag, even if you already plan to close with </|DSML|tool_calls>.
-15) Compatibility note: the runtime also accepts the legacy XML tags <tool_calls> / <invoke> / <parameter>, but prefer the DSML-prefixed form above.
 
 PARAMETER SHAPES:
 - string => <|DSML|parameter name="x"><![CDATA[value]]></|DSML|parameter>

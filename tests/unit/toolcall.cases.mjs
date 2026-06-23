@@ -374,11 +374,11 @@ export const cases = [
     assert.equal(clean, "");
     assert.equal(toolCalls[0].function.name, "Read");
   }],
-  ["extracts fenced markdown tool call JSON", async () => {
+  ["keeps legacy fenced markdown tool call JSON as plain text", async () => {
     const fenced = "before\n```tool_call\n{\"name\":\"Read\",\"arguments\":{\"file_path\":\"README.md\"}}\n```\nafter";
     const [clean, toolCalls] = mod.parseToolCalls(fenced, [{ type: "function", function: { name: "Read", parameters: { type: "object" } } }]);
-    assert.equal(clean, "before\n\nafter");
-    assert.equal(toolCalls[0].function.name, "Read");
+    assert.equal(clean, fenced);
+    assert.deepEqual(toolCalls, []);
   }],
   ["accepts DSML invoke blocks with missing opening root wrapper", async () => {
     const text = "<|DSML|invoke name=\"Read\"><|DSML|parameter name=\"file_path\">README.md</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>";
@@ -432,7 +432,7 @@ export const cases = [
     assert.equal(mod.parseScalarValue("1e999"), "1e999");
     assert.equal(mod.parseScalarValue("{not json}"), "{not json}");
   }],
-  ["keeps malformed legacy tool_call fences while removing valid calls", async () => {
+  ["keeps legacy tool_call fences as plain text", async () => {
     const legacy = [
       "before",
       "```tool_call",
@@ -450,10 +450,8 @@ export const cases = [
     assert.match(clean, /after/);
     assert.match(clean, /```tool_call/);
     assert.match(clean, /\{"arguments":\{"ignored":true\}\}/);
-    assert.doesNotMatch(clean, /\{"name":"Run"/);
-    assert.equal(toolCalls.length, 1);
-    assert.equal(toolCalls[0].function.name, "Run");
-    assert.equal(JSON.parse(toolCalls[0].function.arguments).cmd, "ls");
+    assert.match(clean, /\{"name":"Run"/);
+    assert.deepEqual(toolCalls, []);
   }],
   ["builds equivalent prompt text from direct and bundled tools", async () => {
     const tools = [{

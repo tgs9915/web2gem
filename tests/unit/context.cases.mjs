@@ -140,7 +140,6 @@ export const cases = [
               inlinedBytes: 0,
               droppedFiles: 0,
               multipartUploads: 1,
-              resumableFallbacks: 0,
             },
           });
         },

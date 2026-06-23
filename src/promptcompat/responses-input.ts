@@ -7,6 +7,14 @@ export function normalizeResponsesInputAsMessages(req: unknown): UnknownRecord[]
   return messages || [];
 }
 
+export function normalizeResponsesInputAsMessagesStrict(req: unknown): { messages: UnknownRecord[]; error?: undefined } | { messages?: undefined; error: string } {
+  if (!isRecord(req)) return { error: "request body must be a JSON object" };
+  const validation = validateResponsesInputValue(req.input);
+  if (validation) return { error: validation };
+  const messages = responsesMessagesFromRequest(req);
+  return { messages: messages || [] };
+}
+
 export function responsesMessagesFromRequest(req: unknown): UnknownRecord[] | null {
   if (!isRecord(req)) return null;
   let messages: UnknownRecord[] | null = null;
@@ -229,4 +237,69 @@ function isFileInputType(type: unknown): boolean {
 export function stringifyToolCallArguments(value: unknown): string {
   if (typeof value === "string") return value;
   try { return JSON.stringify(value != null ? value : {}); } catch (_) { return "{}"; }
+}
+
+function validateResponsesInputValue(input: unknown): string {
+  if (input == null || typeof input === "string") return "";
+  if (Array.isArray(input)) {
+    for (let i = 0; i < input.length; i++) {
+      const error = validateResponsesInputArrayItem(input[i], i);
+      if (error) return error;
+    }
+    return "";
+  }
+  if (isRecord(input)) return validateResponsesInputRecord(input, "input");
+  return "Responses input must be a string, object, or array of supported items";
+}
+
+function validateResponsesInputArrayItem(item: unknown, index: number): string {
+  if (typeof item === "string") return item.trim() ? "" : `Responses input item ${index} is empty`;
+  if (!isRecord(item)) return `Responses input item ${index} must be a supported object or string`;
+  return validateResponsesInputRecord(item, `Responses input item ${index}`);
+}
+
+function validateResponsesInputRecord(item: UnknownRecord, label: string): string {
+  const type = String(item.type || "").trim().toLowerCase();
+  const role = normalizeHistoryRole(item.role);
+  if (item.role != null && !role) return `${label} has unsupported role`;
+  if (item.role != null && role) {
+    if (role === "assistant") return validateResponsesAssistantRecord(item, label);
+    if (role === "tool" || role === "function") return item.content != null || item.output != null ? "" : `${label} tool message requires content`;
+    if (item.content != null || typeof item.text === "string" || isFileInputType(type)) return "";
+    return `${label} message requires content`;
+  }
+  switch (type) {
+    case "message":
+    case "input_message":
+      return item.content != null || typeof item.text === "string" ? "" : `${label} message requires content`;
+    case "function_call_output":
+    case "tool_result":
+      return item.output != null || item.content != null ? "" : `${label} tool result requires output`;
+    case "function_call":
+    case "tool_call": {
+      const fn = isRecord(item.function) ? item.function : {};
+      const name = String(item.name || fn.name || "").trim();
+      return name ? "" : `${label} function call requires name`;
+    }
+    case "reasoning":
+    case "thinking":
+      return responsesContentToText(item.summary != null ? item.summary : item.content != null ? item.content : item.text).trim()
+        ? ""
+        : `${label} reasoning item requires text`;
+    case "input_file":
+    case "file":
+      return "";
+    case "input_text":
+    case "text":
+    case "output_text":
+    case "summary_text":
+      return typeof item.text === "string" && item.text.trim() ? "" : `${label} text item requires text`;
+    default:
+      return `${label} has unsupported type${type ? `: ${type}` : ""}`;
+  }
+}
+
+function validateResponsesAssistantRecord(item: UnknownRecord, label: string): string {
+  if (item.content != null || item.reasoning_content != null || item.reasoning != null || item.thinking != null) return "";
+  return Array.isArray(item.tool_calls) && item.tool_calls.length ? "" : `${label} assistant message requires content or tool calls`;
 }

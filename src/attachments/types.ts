@@ -56,7 +56,6 @@ export type AttachmentUsage = {
   inlinedBytes: number;
   droppedFiles: number;
   multipartUploads: number;
-  resumableFallbacks: number;
 };
 
 export type AttachmentUploadResult = {

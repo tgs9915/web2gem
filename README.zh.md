@@ -217,7 +217,6 @@ docker run --rm -p 52389:52389 --env-file .env web2gem:<tag>
 | `CURRENT_INPUT_FILE_NAME`       | `message.txt`               | 大消息上下文附件使用的文件名。                                                                                                                                                     |
 | `CURRENT_TOOLS_FILE_NAME`       | `tools.txt`                 | 大工具定义上下文附件使用的文件名。                                                                                                                                                 |
 | `GENERIC_FILE_UPLOAD_MAX_BYTES` | `20971520`                  | 每个请求内附件的最大字节数。默认上传路径不会向 `content-push.googleapis.com` 发送 Gemini cookie 或 SAPISID 鉴权；请求内附件不可用或上传失败时会忽略附件并在提示词中追加说明。        |
-| `STRUCTURED_OUTPUT_STREAM_MODE` | `reject`                    | 设置为 `best_effort` 时允许流式结构化输出使用提示词约束，但不做最终 JSON 校验。                                                                                                    |
 
 使用 Wrangler CLI 管理 Worker 时，可通过以下命令设置可选 secrets：
 

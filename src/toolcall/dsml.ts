@@ -1,4 +1,3 @@
-import { randHex } from "../shared/runtime";
 import { isRecord, type UnknownRecord } from "../shared/types";
 import { maskMarkdownProtectedSpans, parseMarkdownFenceLine } from "./markdown";
 import { formatOpenAIToolCalls } from "./openai-format";
@@ -36,7 +35,7 @@ export function parseToolCalls(text: unknown, toolsRaw: unknown): [string, OpenA
   if (parsed.calls.length) {
     return [parsed.cleanText, formatOpenAIToolCalls(parsed.calls, toolsRaw)];
   }
-  return parseLegacyToolCalls(text);
+  return [String(text || "").trim(), []];
 }
 
 export function mayContainToolCallSyntax(text: unknown): boolean {
@@ -57,35 +56,6 @@ export function isPartialToolMarkupPrefix(text: unknown): boolean {
 
 export function toolSieveSafeTailLength(text: unknown): number {
   return toolCallSieveSafeTailLength(text);
-}
-
-export function parseLegacyToolCalls(text: unknown): [string, OpenAIToolCall[]] {
-  const source = String(text || "");
-  const toolCalls: OpenAIToolCall[] = [];
-  const re = /```tool_call\s*\n([\s\S]*?)\n```/g;
-  const cleanParts: string[] = [];
-  let lastEnd = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
-    cleanParts.push(source.slice(lastEnd, m.index));
-    lastEnd = m.index + m[0].length;
-    try {
-      const data: unknown = JSON.parse((m[1] || "").trim());
-      if (!isRecord(data) || data.name === undefined) throw new Error("no name");
-      toolCalls.push({
-        id: `call_${randHex(8)}`,
-        type: "function",
-        function: {
-          name: data.name,
-          arguments: JSON.stringify(data.arguments != null ? data.arguments : data.args != null ? data.args : data.input != null ? data.input : {}),
-        },
-      });
-    } catch (_) {
-      cleanParts.push(m[0]);
-    }
-  }
-  cleanParts.push(source.slice(lastEnd));
-  return [cleanParts.join("").trim(), toolCalls];
 }
 
 export function parseDSMLToolCallsDetailed(text: unknown): DSMLToolCallParseResult {

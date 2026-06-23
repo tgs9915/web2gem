@@ -403,11 +403,11 @@ export const cases = [
       current_input_file_min_bytes: 1000000,
       log_requests: false,
     }, provider);
-    assert.equal(resp.status, 200);
-    assert.match(prompts[0], /visible request/);
-    assert.doesNotMatch(prompts[0], /do not leak text/);
-    assert.doesNotMatch(prompts[0], /do not leak content/);
-    assert.doesNotMatch(prompts[0], /do not leak json/);
+    assert.equal(resp.status, 400);
+    const body = await resp.json();
+    assert.equal(body.error.code, "unsupported_responses_input");
+    assert.match(body.error.message, /unsupported type: custom_event/);
+    assert.deepEqual(prompts, []);
   }],
   ["returns OpenAI chat completions with text usage and stop finish", async () => {
     const resp = await mod.handleChat({
@@ -418,7 +418,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText(input) {
         assert.match(input.prompt, /say hi/);
@@ -656,7 +655,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText() {
         return "";
@@ -678,7 +676,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText(input) {
         assert.match(input.prompt, /STRUCTURED OUTPUT REQUIREMENT/);
@@ -711,7 +708,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText(input) {
         assert.match(input.prompt, /Schema name: strict_result/);
@@ -735,7 +731,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: true,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText() {
         throw err;
@@ -793,7 +788,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText(input) {
         assert.match(input.prompt, /Schema name: strict_response/);
@@ -933,7 +927,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText() {
         generated = true;
@@ -986,7 +979,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeStreamProvider(["<tool_calls><invoke name=\"Read\"><parameter name=\"path\">README.md</parameter></invoke></tool_calls>"]));
     assert.equal(resp.status, 200);
     const body = await resp.text();
@@ -1005,7 +997,6 @@ export const cases = [
       current_input_file_enabled: false,
       current_input_file_min_bytes: 1000000,
       log_requests: false,
-      structured_output_stream_mode: "reject",
     }, fakeProvider({
       async generateText() {
         generated = true;
