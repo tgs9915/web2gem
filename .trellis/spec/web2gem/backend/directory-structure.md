@@ -22,13 +22,13 @@
 
 ### 1. Scope / Trigger
 
-Use the completion provider port when code needs model text generation, image resolution, or large-context text-file upload from completion/business logic. This keeps Gemini Web details behind an adapter and prevents completion modules from depending on provider implementation packages.
+Use the completion provider port when code needs model text generation, request-local attachment resolution, or large-context text-file upload from completion/business logic. This keeps Gemini Web details behind an adapter and prevents completion modules from depending on provider implementation packages.
 
 ### 2. Signatures
 
 - `CompletionProvider.generateText(input)` returns final text.
 - `CompletionProvider.streamText(input, options)` returns provider text deltas as `AsyncIterable<string>`. Provider adapters normalize loose upstream chunks before they cross the port.
-- `CompletionProvider.resolveImages(images)` returns provider file references plus dropped-image notes.
+- `CompletionProvider.resolveAttachments(plan)` accepts a provider-neutral attachment plan and returns provider file references plus request-local dropped-attachment notes.
 - `CompletionProvider.uploadTextFile(text, filename)` returns a provider file reference for large context attachment.
 - `CompletionTextInput.fileRefs` is `FileRef[] | null | undefined`; completion and HTTP modules should not pass untyped provider file payloads through this port.
 - `streamPlainCompletionEvents`, `streamToolSieveCompletionEvents`, and `streamBufferedToolTextCompletionEvents` convert provider deltas into explicit completion events.
@@ -39,7 +39,7 @@ Use the completion provider port when code needs model text generation, image re
 - HTTP handlers may depend on completion ports/events, but must not call `gemini/client` or `gemini/uploads`.
 - Completion modules may depend on prompt compatibility, tool-call, toolstream, shared, config, and model types, but not `src/gemini/**`.
 - Stream adapters should format protocol-specific SSE frames from completion events rather than coordinating provider callbacks directly.
-- Context preparation should keep image resolution and large-context text upload behind `CompletionProvider.resolveImages` and `CompletionProvider.uploadTextFile`. Shared prompt/file-reference sequencing belongs in `src/completion/context.ts`; OpenAI and Google branches should only supply protocol-specific prompt conversion and file-reference ordering.
+- Context preparation should keep request-local attachment resolution and large-context text upload behind `CompletionProvider.resolveAttachments` and `CompletionProvider.uploadTextFile`. Shared prompt/file-reference sequencing belongs in `src/completion/context.ts`; OpenAI and Google branches should only supply protocol-specific prompt conversion and file-reference ordering.
 
 ### 4. Validation & Error Matrix
 
@@ -77,6 +77,75 @@ import type { CompletionProvider } from "./ports";
 export function streamCompletionText(provider: CompletionProvider, input: CompletionTextInput) {
   return provider.streamText(input);
 }
+```
+
+## Scenario: Request-Local Attachment Pipeline
+
+### 1. Scope / Trigger
+
+Use this contract when changing OpenAI/Google file or image input handling, request-local attachment upload, Gemini upload transport, file-reference ordering, or large-context text attachment integration.
+
+### 2. Signatures
+
+- `src/attachments/types.ts` owns `AttachmentPlan`, `AttachmentCandidate`, `AttachmentDrop`, and `AttachmentUploadResult`.
+- `src/attachments/plan.ts` owns `createAttachmentPlan({ images, files, existingFileRefs, maxFiles })`, `mergeAttachmentPlans(...)`, candidate ordering, max-count enforcement, and request-local candidate normalization.
+- `src/attachments/refs.ts` owns existing file-reference extraction and consolidation, including OpenAI-compatible `file_id`, `ref_file_ids`, `file_ids`, and direct provider file-ref objects.
+- `src/attachments/collect-openai.ts` owns OpenAI-compatible request walking for top-level inline upload candidates and returns an `AttachmentPlan` by composing `refs.ts` and `plan.ts`.
+- `src/attachments/notes.ts` owns dropped-attachment records and deterministic prompt notes.
+- `CompletionProvider.resolveAttachments(plan)` resolves request-local candidates to provider file refs and prompt notes.
+- `CompletionProvider.uploadTextFile(text, filename)` uploads required large-context text files.
+
+### 3. Contracts
+
+- `src/attachments/**` is provider-neutral and may depend on `src/shared/**`, but must not import `src/gemini/**`, HTTP adapters, or completion modules.
+- `src/completion/**` must call provider ports for upload and must not import Gemini upload modules.
+- `src/gemini/uploads/**` owns Gemini Web upload protocol details. Preferred content-push upload is multipart and must not include Gemini cookie or SAPISID authorization headers.
+- Request-local candidate dedupe is scoped to one request and keyed by MIME/content type, filename, and bytes.
+- Large-context `message.txt` / `tools.txt` uploads use the upload transport but keep hard-failure semantics through `prepareContextFiles`.
+
+### 4. Validation & Error Matrix
+
+- Invalid base64/data URL request-local attachment -> continue as text-only with deterministic prompt note.
+- Remote `http://` / `https://` URLs are not upload sources. Match `ds2api`: only inline base64/data URL payloads are materialized for request-local upload.
+- Explicit file inputs that provide only a remote URL and no existing file reference -> continue as text-only with deterministic invalid-file prompt note; do not fetch the URL.
+- Preferred multipart upload rejection -> attempt isolated resumable fallback only for explicit content-push protocol/auth-style HTTP statuses: `400`, `401`, `403`, `404`, `405`, `415`, or `501`.
+- Preferred multipart invalid file refs, ambiguous exceptions without a status, network-like failures, aborts, and local validation failures -> do not auth fallback; request-local attachments degrade with a deterministic prompt note and required context-file uploads fail.
+- Resumable fallback failure for request-local attachment -> continue with deterministic prompt note.
+- Required large-context text upload failure -> return `large_context_file_upload_failed`; do not fall back to oversized inline context.
+
+### 5. Good/Base/Bad Cases
+
+- Good: prompt conversion emits markers, attachment planning owns candidates/refs, completion calls `resolveAttachments(plan)`, and Gemini adapter executes the plan.
+- Base: `src/shared/media.ts` may remain a compatibility re-export, but parsing logic belongs under `src/attachments/`.
+- Bad: `src/completion/context.ts` imports `src/gemini/uploads`.
+- Bad: adding a second resolver path for images or files outside `AttachmentPlan`.
+- Bad: sending `Cookie` or `Authorization` to `https://content-push.googleapis.com/upload` on the preferred multipart path.
+
+### 6. Tests Required
+
+- Unit tests for attachment planning, max count, existing ref consolidation, dedupe, invalid base64, remote URL non-fetch behavior, multipart request construction, fallback resumable auth headers, upload protocol telemetry, and final file-ref ordering.
+- HTTP/context tests should assert provider handoff through `resolveAttachments(plan)`, not `resolveImages` / `resolveFiles`.
+- Run `pnpm typecheck`, `pnpm check:arch`, `pnpm unit`, and `pnpm smoke`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const imageRefs = await provider.resolveImages(images);
+const fileRefs = await provider.resolveFiles(files);
+```
+
+#### Correct
+
+```typescript
+const attachmentResult = await provider.resolveAttachments(attachmentPlan);
+const fileRefs = mergeFileRefs(
+  contextFileRefs,
+  attachmentPlan.existingFileRefs,
+  attachmentResult.genericFileRefs,
+  attachmentResult.imageFileRefs,
+);
 ```
 
 ## Architecture Guard

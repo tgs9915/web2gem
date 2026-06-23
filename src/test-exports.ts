@@ -18,6 +18,7 @@ export {
   parseUploadUrl,
   sanitizeUploadFilename,
   uploadFilenameFromObject,
+  uploadMimeFromObject,
 } from "./shared/media";
 export {
   abortError,
@@ -58,7 +59,8 @@ export { inlineContextBodyReadLimit, readRouteJsonPost } from "./http/core/route
 export { sseResponse } from "./http/core/sse";
 export { streamErrorText, streamInterruptedWarningText, streamWarningObject, writeStreamWarningEvent } from "./http/core/stream-errors";
 export { httpFetch } from "./gemini/transport/http";
-export { base64ToBytes, getPageTokens, resetGeminiUploadCachesForTest, resolveFiles, resolveImages, uploadFile, uploadImage, uploadTextFile } from "./gemini/uploads";
+export { base64ToBytes, buildMultipartFileBody, collectOpenAIInlineUploadImages, collectOpenAIRequestAttachmentPlan, createAttachmentPlan, droppedAttachmentNote, getPageTokens, resetGeminiUploadCachesForTest, resolveAttachments, uploadMultipartFile, uploadTextFile } from "./gemini/uploads";
+export { resolveFiles, resolveImages, uploadFile, uploadImage } from "./gemini/uploads/execute";
 export {
   contextFilePromptByteCheck,
   contextFileThreshold,

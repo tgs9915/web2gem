@@ -1,8 +1,9 @@
 import { generate, generateStream } from "./client";
-import { resolveFiles, resolveImages, uploadTextFile } from "./uploads";
+import { resolveAttachments, uploadTextFile } from "./uploads";
 import type { RuntimeConfig } from "../config";
 import type { ResolvedModel } from "../models";
 import type { CompletionProvider, CompletionProviderOptions, CompletionTextInput } from "../completion/ports";
+import type { AttachmentPlan } from "../attachments/types";
 
 type ResolvedModelOK = Extract<ResolvedModel, { name: string }>;
 
@@ -19,11 +20,8 @@ export function createGeminiCompletionProvider(cfg: RuntimeConfig): CompletionPr
         if (text) yield text;
       }
     },
-    resolveImages(images: unknown) {
-      return resolveImages(cfg, images);
-    },
-    resolveFiles(files: unknown) {
-      return resolveFiles(cfg, files);
+    resolveAttachments(plan: AttachmentPlan) {
+      return resolveAttachments(cfg, plan);
     },
     uploadTextFile(text: string, filename: string) {
       return uploadTextFile(cfg, text, filename);

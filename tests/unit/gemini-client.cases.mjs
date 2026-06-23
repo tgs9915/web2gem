@@ -972,7 +972,15 @@ export const cases = [
       log_requests: false,
     };
     const provider = mod.createGeminiCompletionProvider(cfg);
-    assert.deepEqual(await provider.resolveImages([]), { fileRefs: null, droppedNote: "" });
+    assert.deepEqual(await provider.resolveAttachments(mod.createAttachmentPlan()), {
+      fileRefs: null,
+      imageFileRefs: null,
+      genericFileRefs: null,
+      promptText: "",
+      droppedNote: "",
+      supportsFileRefs: false,
+      usage: { uploadedFiles: 0, dedupedFiles: 0, uploadedBytes: 0, fileRefBytes: 0, inlinedFiles: 0, inlinedBytes: 0, droppedFiles: 0, multipartUploads: 0, resumableFallbacks: 0 },
+    });
 
     const calls = [];
     await withFetch(async (url, init) => {
@@ -980,17 +988,13 @@ export const cases = [
       if (String(url) === "https://gemini.example/app") {
         return new Response("<html></html>", { status: 200 });
       }
-      if (String(url) === "https://content-push.googleapis.com/upload/") {
+      if (String(url) === "https://content-push.googleapis.com/upload") {
         assert.equal(init.method, "POST");
-        assert.equal(init.headers["X-Goog-Upload-Header-Content-Type"], "text/plain; charset=utf-8");
-        return new Response("", {
-          status: 200,
-          headers: { "x-goog-upload-url": "https://upload.example/finalize" },
-        });
-      }
-      if (String(url) === "https://upload.example/finalize") {
-        assert.equal(init.method, "POST");
-        assert.equal(init.headers["X-Goog-Upload-Command"], "upload, finalize");
+        assert.equal(init.headers["X-Tenant-Id"], "bard-storage");
+        assert.equal(init.headers.Cookie, undefined);
+        assert.equal(init.headers.Authorization, undefined);
+        assert.match(init.headers["Content-Type"], /^multipart\/form-data; boundary=/);
+        assert.match(new TextDecoder().decode(init.body), /name="file"; filename="context\.txt"/);
         return new Response("/uploaded/context-file", { status: 200 });
       }
       throw new Error(`unexpected upload URL: ${url}`);
@@ -1000,8 +1004,7 @@ export const cases = [
     });
     assert.deepEqual(calls.map((call) => call.url), [
       "https://gemini.example/app",
-      "https://content-push.googleapis.com/upload/",
-      "https://upload.example/finalize",
+      "https://content-push.googleapis.com/upload",
     ]);
   }],
 ];

@@ -1,5 +1,5 @@
 import assert from "./assertions.js";
-import { baseConfig, chunks, collectSSEData, fakeProvider, fakeStreamProvider, mod, resolvedModel, streamError, withConsoleLog, withFetch } from "./helpers.js";
+import { attachmentResult, baseConfig, chunks, collectSSEData, fakeProvider, fakeStreamProvider, mod, resolvedModel, streamError, withConsoleLog, withFetch } from "./helpers.js";
 
 export const suiteName = "openai http";
 export const cases = [
@@ -24,8 +24,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -117,6 +117,69 @@ export const cases = [
     assert.match(body.error.message, /failed to upload history context text file/);
     assert.equal(generated, false);
   }],
+  ["rejects oversized inline context before resolving request-local attachments", async () => {
+    let generated = false;
+    const resp = await mod.handleChat({
+      model: "gemini-3.5-flash",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "large prompt " + "x".repeat(80) },
+          { type: "input_file", file_url: "https://files.example/expensive.bin", filename: "expensive.bin" },
+        ],
+      }],
+    }, baseConfig({
+      current_input_file_enabled: true,
+      current_input_file_min_bytes: 1,
+      cookie: "",
+    }), fakeProvider({
+      async resolveAttachments() {
+        throw new Error("resolveAttachments should not run");
+      },
+      async generateText() {
+        generated = true;
+        return "unexpected";
+      },
+    }));
+    assert.equal(resp.status, 413);
+    const body = await resp.json();
+    assert.equal(body.error.code, "large_context_inline_unsupported");
+    assert.equal(generated, false);
+  }],
+  ["fails context upload before resolving request-local attachments", async () => {
+    let generated = false;
+    const uploadErr = new Error("upload refused before attachment fetch");
+    const resp = await mod.handleChat({
+      model: "gemini-3.5-flash",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "large prompt " + "x".repeat(80) },
+          { type: "input_file", file_url: "https://files.example/expensive.bin", filename: "expensive.bin" },
+        ],
+      }],
+    }, baseConfig({
+      current_input_file_enabled: true,
+      current_input_file_min_bytes: 1,
+      cookie: "SID=ok",
+    }), fakeProvider({
+      async resolveAttachments() {
+        throw new Error("resolveAttachments should not run");
+      },
+      async uploadTextFile() {
+        throw uploadErr;
+      },
+      async generateText() {
+        generated = true;
+        return "unexpected";
+      },
+    }));
+    assert.equal(resp.status, 502);
+    const body = await resp.json();
+    assert.equal(body.error.code, "large_context_file_upload_failed");
+    assert.match(body.error.message, /failed to upload history context text file/);
+    assert.equal(generated, false);
+  }],
   ["adds dropped image note when Responses image upload is unavailable", async () => {
     let generated = false;
     const prompts = [];
@@ -129,11 +192,10 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return {
-          fileRefs: null,
+      async resolveAttachments() {
+        return attachmentResult({
           droppedNote: "\n\n[Note: 1 image(s) were provided but ignored - image input requires a configured GEMINI_COOKIE.]",
-        };
+        });
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -162,8 +224,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -200,8 +262,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -240,8 +302,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(text, filename) {
         uploads.push({ text, filename });
@@ -292,8 +354,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -322,8 +384,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -421,9 +483,12 @@ export const cases = [
         ],
       }],
     }, baseConfig(), fakeProvider({
-      async resolveFiles(files) {
-        seenFiles = files;
-        return { fileRefs: [{ ref: "/uploaded/main-py", name: "main.py" }], droppedNote: "" };
+      async resolveAttachments(plan) {
+        seenFiles = plan.candidates.map(simplifyAttachmentCandidate);
+        return attachmentResult({
+          fileRefs: [{ ref: "/uploaded/main-py", name: "main.py" }],
+          genericFileRefs: [{ ref: "/uploaded/main-py", name: "main.py" }],
+        });
       },
       async generateText(input) {
         seenFileRefs = input.fileRefs;
@@ -455,9 +520,12 @@ export const cases = [
         }],
       }],
     }, baseConfig(), fakeProvider({
-      async resolveFiles(files) {
-        seenFiles = files;
-        return { fileRefs: [{ ref: "/uploaded/note", name: "note.txt" }], droppedNote: "" };
+      async resolveAttachments(plan) {
+        seenFiles = plan.candidates.map(simplifyAttachmentCandidate);
+        return attachmentResult({
+          fileRefs: [{ ref: "/uploaded/note", name: "note.txt" }],
+          genericFileRefs: [{ ref: "/uploaded/note", name: "note.txt" }],
+        });
       },
       async generateText(input) {
         seenFileRefs = input.fileRefs;
@@ -478,9 +546,12 @@ export const cases = [
         { type: "input_file", filename: "../note.txt", file_data: { data: "aGVsbG8=", mime_type: "text/plain" } },
       ],
     }, baseConfig(), fakeProvider({
-      async resolveFiles(files) {
-        seenFiles = files;
-        return { fileRefs: [{ ref: "/uploaded/note", name: "note.txt" }], droppedNote: "" };
+      async resolveAttachments(plan) {
+        seenFiles = plan.candidates.map(simplifyAttachmentCandidate);
+        return attachmentResult({
+          fileRefs: [{ ref: "/uploaded/note", name: "note.txt" }],
+          genericFileRefs: [{ ref: "/uploaded/note", name: "note.txt" }],
+        });
       },
       async generateText(input) {
         seenFileRefs = input.fileRefs;
@@ -502,9 +573,12 @@ export const cases = [
         { type: "file", file_id: "file_existing", filename: "existing.txt" },
       ],
     }, baseConfig(), fakeProvider({
-      async resolveFiles(files) {
-        seenFiles = files;
-        return { fileRefs: [{ ref: "/uploaded/top", name: "top.txt" }], droppedNote: "" };
+      async resolveAttachments(plan) {
+        seenFiles = plan.candidates.map(simplifyAttachmentCandidate);
+        return attachmentResult({
+          fileRefs: [{ ref: "/uploaded/top", name: "top.txt" }],
+          genericFileRefs: [{ ref: "/uploaded/top", name: "top.txt" }],
+        });
       },
       async generateText(input) {
         seenFileRefs = input.fileRefs;
@@ -525,8 +599,8 @@ export const cases = [
       model: "gemini-3.5-flash",
       messages: [{ role: "user", content: [{ type: "input_file", data: "aGVsbG8=", filename: "note.txt" }] }],
     }, baseConfig(), fakeProvider({
-      async resolveFiles() {
-        return { fileRefs: null, droppedNote: "\n\n[Note: 1 file(s) were provided but ignored - some file uploads failed.]" };
+      async resolveAttachments() {
+        return attachmentResult({ droppedNote: "\n\n[Note: 1 file(s) were provided but ignored - attachment upload failed.]" });
       },
       async generateText(input) {
         seenPrompt = input.prompt;
@@ -537,7 +611,40 @@ export const cases = [
     assert.equal(resp.status, 200);
     const body = await resp.json();
     assert.equal(body.choices[0].message.content, "continued");
-    assert.match(seenPrompt, /\[Note: 1 file\(s\) were provided but ignored - some file uploads failed\.\]/);
+    assert.match(seenPrompt, /\[Note: 1 file\(s\) were provided but ignored - attachment upload failed\.\]/);
+    assert.equal(seenFileRefs, null);
+  }],
+  ["inlines anonymous generic file text and suppresses file refs before OpenAI chat generation", async () => {
+    let seenPrompt = "";
+    let seenFileRefs = "unset";
+    const resp = await mod.handleChat({
+      model: "gemini-3.5-flash",
+      ref_file_ids: ["file_existing"],
+      messages: [{
+        role: "user",
+        content: [
+          { type: "input_text", text: "summarize this" },
+          { type: "input_file", data: "aGVsbG8=", filename: "note.txt", mime: "text/plain" },
+        ],
+      }],
+    }, baseConfig(), fakeProvider({
+      async resolveAttachments() {
+        return attachmentResult({
+          promptText: "\n\n[File attachment: note.txt]\nhello\n[/File attachment]",
+          supportsFileRefs: false,
+        });
+      },
+      async generateText(input) {
+        seenPrompt = input.prompt;
+        seenFileRefs = input.fileRefs;
+        return "continued";
+      },
+    }));
+    assert.equal(resp.status, 200);
+    const body = await resp.json();
+    assert.equal(body.choices[0].message.content, "continued");
+    assert.match(seenPrompt, /summarize this/);
+    assert.match(seenPrompt, /\[File attachment: note\.txt\]\nhello\n\[\/File attachment\]/);
     assert.equal(seenFileRefs, null);
   }],
   ["returns OpenAI chat empty upstream warning with visible fallback text", async () => {
@@ -1229,3 +1336,11 @@ export const cases = [
     assert.equal(completed.response.output[0].content[0].text, mod.EMPTY_UPSTREAM_MSG);
   }],
 ];
+
+function simplifyAttachmentCandidate(candidate) {
+  const out = {};
+  if (candidate.source?.type === "base64") out.b64 = candidate.source.data;
+  if (candidate.mime) out.mime = candidate.mime;
+  if (candidate.filename) out.filename = candidate.filename;
+  return out;
+}

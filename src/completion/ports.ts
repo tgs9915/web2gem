@@ -1,5 +1,6 @@
 import type { ResolvedModel } from "../models";
-import type { FileRef, FileResolutionResult, ImageResolutionResult } from "./types";
+import type { AttachmentPlan } from "../attachments/types";
+import type { AttachmentResolutionResult, FileRef } from "./types";
 
 export type CompletionTextInput = {
   prompt: string;
@@ -14,7 +15,6 @@ export type CompletionProviderOptions = {
 export type CompletionProvider = {
   generateText(input: CompletionTextInput): Promise<string>;
   streamText(input: CompletionTextInput, options?: CompletionProviderOptions): AsyncIterable<string>;
-  resolveImages(images: unknown): Promise<ImageResolutionResult>;
-  resolveFiles(files: unknown): Promise<FileResolutionResult>;
+  resolveAttachments(plan: AttachmentPlan): Promise<AttachmentResolutionResult>;
   uploadTextFile(text: string, filename: string): Promise<FileRef>;
 };

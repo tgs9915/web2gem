@@ -267,11 +267,10 @@ export const cases = [
     assert.equal((text.match(/\[image input\]/g) || []).length, 3);
     assert.match(text, /\[file input file_1\]/);
     assert.match(text, /custom output/);
-    assert.deepEqual(images[0], { url: "https://cdn.example.com/folder/photo%201.png?x=1", filename: "remote.jpg" });
-    assert.deepEqual(images[1], { b64: "AAAA", mime: "image/jpeg", filename: "nested.jpg" });
-    assert.deepEqual(images[2], { b64: "BBBB", mime: "image/webp", filename: "data.webp" });
+    assert.deepEqual(images[0], { b64: "AAAA", mime: "image/jpeg", filename: "nested.jpg" });
+    assert.deepEqual(images[1], { b64: "BBBB", mime: "image/webp", filename: "data.webp" });
   }],
-  ["collects inline and remote input_file parts as generic upload candidates", async () => {
+  ["collects inline input_file parts and treats remote file URLs as missing payloads", async () => {
     const images = [];
     const files = [];
     const text = mod.messageContentToPrompt([
@@ -295,7 +294,7 @@ export const cases = [
       { b64: "cHJpbnQoMSkK", mime: "text/x-python", filename: "main.py" },
       { b64: "aGVsbG8=", mime: "text/plain", filename: "note.txt" },
       { b64: "", mime: "text/plain", filename: "empty.txt" },
-      { url: "https://files.example/archive/app.ts?sig=secret", filename: "app.ts" },
+      { invalidReason: "missing generic file upload data", mime: "text/typescript", filename: "app.ts" },
       { invalidReason: "missing generic file upload data", mime: "text/plain", filename: "missing.txt" },
     ]);
 
@@ -304,6 +303,22 @@ export const cases = [
       content: [{ type: "input_file", data: "aGVsbG8=", filename: "note.txt" }],
     }], null, "auto", [], "", 1000000);
     assert.deepEqual(result.files, [{ b64: "aGVsbG8=", mime: "text/plain", filename: "note.txt" }]);
+  }],
+  ["uses explicit image_url MIME metadata when a data URL omits MIME", async () => {
+    const images = [];
+    const text = mod.messageContentToPrompt([
+      { type: "image_url", image_url: { url: "data:;base64,AAAA", mime_type: "image/jpeg" }, filename: "photo.jpg" },
+    ], images, []);
+    assert.equal(text, "[image input]");
+    assert.deepEqual(images, [{ b64: "AAAA", mime: "image/jpeg", filename: "photo.jpg" }]);
+  }],
+  ["uses top-level image_url data URL when image_url object is omitted", async () => {
+    const images = [];
+    const text = mod.messageContentToPrompt([
+      { type: "image_url", url: "data:image/gif;base64,R0lGODlh", filename: "direct.gif" },
+    ], images, []);
+    assert.equal(text, "[image input]");
+    assert.deepEqual(images, [{ b64: "R0lGODlh", mime: "image/gif", filename: "direct.gif" }]);
   }],
   ["preserves Google fileData fileUri and collects inline non-image parts", async () => {
     const req = {
@@ -388,7 +403,7 @@ export const cases = [
       type: "image_url",
       image_url: { url: "https://cdn.example.com/assets/raw.png" },
     }, images), "[image input]");
-    assert.deepEqual(images, [{ url: "https://cdn.example.com/assets/raw.png", filename: "raw.png" }]);
+    assert.deepEqual(images, []);
     assert.equal(mod.messageContentToPrompt({ type: "file" }, []), "[file input]");
     assert.equal(mod.messageContentToPrompt({ text: { type: "output_text", text: "fallback output" } }, []), "fallback output");
 
@@ -398,7 +413,7 @@ export const cases = [
   }],
   ["sanitizes media filenames and maps image mime extensions", async () => {
     assert.deepEqual(mod.parseImageUrl("data:IMAGE/PNG;charset=utf-8;base64,AAAA"), { b64: "AAAA", mime: "image/png" });
-    assert.deepEqual(mod.parseImageUrl("https://example.com/a.png"), { url: "https://example.com/a.png" });
+    assert.equal(mod.parseImageUrl("https://example.com/a.png"), null);
     assert.equal(mod.parseImageUrl("ftp://example.com/a.png"), null);
     assert.equal(mod.sanitizeUploadFilename("../bad\u0000\r\nname.png"), "bad  name.png");
     assert.equal(mod.sanitizeUploadFilename(".."), "");

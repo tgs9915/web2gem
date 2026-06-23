@@ -1,13 +1,8 @@
 import type { ErrorWithMetadata, UnknownRecord } from "../shared/types";
 import type { TokenCharCounts } from "../shared/tokens";
+import type { AttachmentFileRef, AttachmentUploadResult } from "../attachments/types";
 
-export type FileRef = string | {
-  ref?: string;
-  fileRef?: string;
-  id?: string;
-  name?: string;
-  filename?: string;
-};
+export type FileRef = AttachmentFileRef;
 
 export type ToolDef = {
   name: string;
@@ -26,10 +21,7 @@ export type PromptMetadata = {
   hasToolInstructions?: boolean;
 };
 
-export type AttachmentResolutionResult = {
-  fileRefs: FileRef[] | null;
-  droppedNote: string;
-};
+export type AttachmentResolutionResult = AttachmentUploadResult;
 
 export type ImageResolutionResult = AttachmentResolutionResult;
 

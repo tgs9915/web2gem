@@ -1,5 +1,5 @@
 import assert from "./assertions.js";
-import { baseConfig, chunks, collectSSEData, fakeProvider, fakeStreamProvider, mod, resolvedModel, streamError, withConsoleLog, withFetch } from "./helpers.js";
+import { attachmentResult, baseConfig, chunks, collectSSEData, fakeProvider, fakeStreamProvider, mod, resolvedModel, streamError, withConsoleLog, withFetch } from "./helpers.js";
 
 export const suiteName = "google http";
 export const cases = [
@@ -13,8 +13,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -46,8 +46,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -88,8 +88,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -121,11 +121,15 @@ export const cases = [
   }],
   ["keeps Google image refs before context refs while appending generic refs", async () => {
     const provider = fakeProvider({
-      async resolveImages() {
-        return { fileRefs: [{ ref: "/uploaded/image", name: "image.png" }], droppedNote: "" };
-      },
-      async resolveFiles() {
-        return { fileRefs: [{ ref: "/uploaded/file", name: "note.txt" }], droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult({
+          fileRefs: [
+            { ref: "/uploaded/image", name: "image.png" },
+            { ref: "/uploaded/file", name: "note.txt" },
+          ],
+          imageFileRefs: [{ ref: "/uploaded/image", name: "image.png" }],
+          genericFileRefs: [{ ref: "/uploaded/file", name: "note.txt" }],
+        });
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -452,8 +456,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(text, filename) {
         uploads.push({ text, filename });
@@ -504,8 +508,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -536,8 +540,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };
@@ -575,8 +579,8 @@ export const cases = [
       streamText() {
         return chunks([]);
       },
-      async resolveImages() {
-        return { fileRefs: null, droppedNote: "" };
+      async resolveAttachments() {
+        return attachmentResult();
       },
       async uploadTextFile(_text, filename) {
         return { ref: `/uploaded/${filename}`, name: filename };

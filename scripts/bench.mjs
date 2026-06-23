@@ -45,8 +45,8 @@ const FAKE_PROVIDER = {
   async *streamText() {
     yield "ok";
   },
-  async resolveImages() {
-    return { fileRefs: null, droppedNote: "" };
+  async resolveAttachments() {
+    return emptyAttachmentResult();
   },
   async uploadTextFile(_text, filename) {
     return { ref: `/uploaded/${filename}`, name: filename };
@@ -102,13 +102,28 @@ const smallDeltaProvider = {
   async *streamText() {
     for (let i = 0; i < SSE_CHUNKS; i++) yield "x";
   },
-  async resolveImages() {
-    return { fileRefs: null, droppedNote: "" };
+  async resolveAttachments() {
+    return emptyAttachmentResult();
   },
   async uploadTextFile(_text, filename) {
     return { ref: `/uploaded/${filename}`, name: filename };
   },
 };
+
+function emptyAttachmentResult() {
+  return {
+    fileRefs: null,
+    imageFileRefs: null,
+    genericFileRefs: null,
+    droppedNote: "",
+    usage: {
+      uploadedFiles: 0,
+      dedupedFiles: 0,
+      uploadedBytes: 0,
+      droppedFiles: 0,
+    },
+  };
+}
 
 const cases = [
   { name: "route_options", fn: () => mod.default.fetch(new Request("https://worker.example/v1/models", { method: "OPTIONS" }), {}, {}) },

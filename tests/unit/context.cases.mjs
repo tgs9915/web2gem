@@ -1,5 +1,5 @@
 import assert from "./assertions.js";
-import { chunks, fakeProvider, fakeStreamProvider, mod, withConsoleLog, withFetch } from "./helpers.js";
+import { attachmentResult, chunks, fakeProvider, fakeStreamProvider, mod, withConsoleLog, withFetch } from "./helpers.js";
 
 export const suiteName = "context";
 export const cases = [
@@ -106,6 +106,57 @@ export const cases = [
     const longPrompt = mod.latestInputPromptForContextFile(smallCfg, "x".repeat(5000));
     assert.match(longPrompt, /latest user request is at the end of `conversation\.txt`/);
     assert.doesNotMatch(longPrompt, /x{100}/);
+  }],
+  ["adds file-ref attachment bytes to prepared prompt token usage", async () => {
+    const cfg = {
+      current_input_file_enabled: false,
+      current_input_file_min_bytes: 1000000,
+      current_input_file_name: "message.txt",
+      current_tools_file_name: "tools.txt",
+      cookie: "SID=ok",
+      log_requests: false,
+    };
+    const messages = [{
+      role: "user",
+      content: [
+        { type: "input_text", text: "review this" },
+        { type: "input_file", data: "YWJjZGVmZ2hp", filename: "nine.txt", mime_type: "text/plain" },
+      ],
+    }];
+    const prepareWithFileRefBytes = (fileRefBytes) => mod.prepareOpenAIGeminiContext(
+      cfg,
+      fakeProvider({
+        async resolveAttachments(plan) {
+          assert.equal(plan.candidates.length, 1);
+          return attachmentResult({
+            fileRefs: [{ ref: "/uploaded/nine", name: "nine.txt" }],
+            genericFileRefs: [{ ref: "/uploaded/nine", name: "nine.txt" }],
+            usage: {
+              uploadedFiles: 1,
+              dedupedFiles: 0,
+              uploadedBytes: 9,
+              fileRefBytes,
+              inlinedFiles: 0,
+              inlinedBytes: 0,
+              droppedFiles: 0,
+              multipartUploads: 1,
+              resumableFallbacks: 0,
+            },
+          });
+        },
+      }),
+      {},
+      messages,
+      null,
+      "auto",
+      null,
+      null,
+    );
+    const base = await prepareWithFileRefBytes(0);
+    const withBytes = await prepareWithFileRefBytes(9);
+    assert.equal(base.error, undefined);
+    assert.equal(withBytes.error, undefined);
+    assert.equal(withBytes.promptTokens, base.promptTokens + 3);
   }],
   ["returns upload failure metadata when large context has no uploader", async () => {
     const cfg = {

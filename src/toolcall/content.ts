@@ -1,4 +1,4 @@
-import { filenameFromUrl, firstNonEmptyString, imageFilenameFromObject, normalizeUploadFileInput, parseImageUrl, uploadFilenameFromObject } from "../shared/media";
+import { firstNonEmptyString, imageFilenameFromObject, normalizeUploadFileInput, parseImageUrl, uploadFilenameFromObject, uploadMimeFromObject } from "../shared/media";
 import { isRecord, type UnknownRecord } from "../shared/types";
 import { toolDefsFromTools } from "./tool-meta";
 import { isToolBundle } from "./tool-bundle";
@@ -137,19 +137,19 @@ export function messageContentToPrompt(content: unknown, images: UnknownRecord[]
         const text = responsesContentToText(c.summary != null ? c.summary : c.text != null ? c.text : c.content);
         if (text) textParts.push(`[reasoning_content]\n${text}\n[/reasoning_content]`);
       } else if (t === "image_url" || c.image_url) {
-        const imageUrl = c.image_url;
+        const imageUrl = c.image_url != null ? c.image_url : c.url;
         const u = isRecord(imageUrl) ? imageUrl.url : imageUrl;
-        const img = parseImageUrl(u);
-        if (img) images.push({ ...img, filename: imageFilenameFromObject(c) || ("url" in img ? filenameFromUrl(img.url) : "") });
+        const img = parseImageUrl(u, uploadMimeFromObject(c));
+        if (img) images.push({ ...img, filename: imageFilenameFromObject(c) });
         textParts.push("[image input]");
       } else if (t === "image" || t === "input_image") {
         const source = isRecord(c.source) ? c.source : null;
         if (source && source.data) {
-          images.push({ b64: source.data, mime: source.media_type || source.mime_type || "image/png", filename: imageFilenameFromObject(c) });
+          images.push({ b64: source.data, mime: uploadMimeFromObject(c) || "image/png", filename: imageFilenameFromObject(c) });
         } else if (c.image_url) {
           const imageUrl = c.image_url;
-          const img = parseImageUrl(isRecord(imageUrl) ? imageUrl.url : imageUrl);
-          if (img) images.push({ ...img, filename: imageFilenameFromObject(c) || ("url" in img ? filenameFromUrl(img.url) : "") });
+          const img = parseImageUrl(isRecord(imageUrl) ? imageUrl.url : imageUrl, uploadMimeFromObject(c));
+          if (img) images.push({ ...img, filename: imageFilenameFromObject(c) });
         }
         textParts.push("[image input]");
       } else if (t === "input_file" || t === "file") {
@@ -167,12 +167,12 @@ export function messageContentToPrompt(content: unknown, images: UnknownRecord[]
     if (t === "image_url" || t === "image" || t === "input_image") {
       const source = isRecord(content.source) ? content.source : null;
       if (source && source.data) {
-        images.push({ b64: source.data, mime: source.media_type || source.mime_type || "image/png", filename: imageFilenameFromObject(content) });
+        images.push({ b64: source.data, mime: uploadMimeFromObject(content) || "image/png", filename: imageFilenameFromObject(content) });
       } else {
-        const imageUrl = content.image_url;
+        const imageUrl = content.image_url != null ? content.image_url : content.url;
         const u = isRecord(imageUrl) ? imageUrl.url : imageUrl;
-        const img = parseImageUrl(u);
-        if (img) images.push({ ...img, filename: imageFilenameFromObject(content) || ("url" in img ? filenameFromUrl(img.url) : "") });
+        const img = parseImageUrl(u, uploadMimeFromObject(content));
+        if (img) images.push({ ...img, filename: imageFilenameFromObject(content) });
       }
       return "[image input]";
     }
