@@ -122,6 +122,17 @@ export const cases = [
       { prompt: "empty buffered prompt", rm: { name: "gemini-3.5-flash" }, fileRefs: null },
     ));
     assert.deepEqual(emptyBuffered.map((event) => event.type), ["empty", "done"]);
+
+    const splitHeldCandidate = [
+      "<tool_calls><invoke name=\"Read\"><parameter name=\"path\">",
+      "README.md",
+    ];
+    const splitBufferedEvents = await collectEvents(mod.streamBufferedToolTextCompletionEvents(
+      fakeStreamProvider(splitHeldCandidate),
+      { prompt: "split buffered prompt", rm: { name: "gemini-3.5-flash" }, fileRefs: null },
+    ));
+    assert.deepEqual(splitBufferedEvents.map((event) => event.type), ["buffered_text", "done"]);
+    assert.equal(splitBufferedEvents[0].text, splitHeldCandidate.join(""));
   }],
   ["summarizes buffered tool text streams across success error and abort paths", async () => {
     const emitted = [];
@@ -137,6 +148,13 @@ export const cases = [
     assert.equal(errorSummary.errMsg, "stream broke");
     assert.equal(errorSummary.streamErr.message, "stream broke");
     assert.equal(errored.join("") + errorSummary.bufferedText, longText);
+
+    const splitHeldCandidate = [
+      "<tool_calls><invoke name=\"Read\"><parameter name=\"path\">",
+      "README.md",
+    ];
+    const splitSummary = await mod.consumeBufferedToolTextDeltas(chunks(splitHeldCandidate), () => {});
+    assert.equal(splitSummary.bufferedText, splitHeldCandidate.join(""));
 
     async function* abortingBuffered() {
       const err = new Error("buffer abort");
@@ -260,9 +278,17 @@ export const cases = [
     });
   }],
   ["holds complete DSML candidates until flush without leaking text", async () => {
+    const chunkedState = mod.createToolSieveState();
+    const partialCandidate = "<|DSML|tool_calls><|DSML|invoke name=\"Read\"><|DSML|parameter name=\"path\">";
+    assert.deepEqual(mod.processToolSieveChunk(chunkedState, partialCandidate.slice(0, 32)), []);
+    assert.deepEqual(mod.processToolSieveChunk(chunkedState, partialCandidate.slice(32)), []);
+    assert.equal(chunkedState.heldLength, partialCandidate.length);
+    assert.equal(chunkedState.heldLength > chunkedState.buffer.length, true);
+
     const state = mod.createToolSieveState();
     const candidate = "<|DSML|tool_calls><|DSML|invoke name=\"Read\"><|DSML|parameter name=\"path\"><![CDATA[README.md]]></|DSML|parameter></|DSML|invoke></|DSML|tool_calls>";
-    assert.deepEqual(mod.processToolSieveChunk(state, candidate), []);
+    assert.deepEqual(mod.processToolSieveChunk(state, candidate.slice(0, 32)), []);
+    assert.deepEqual(mod.processToolSieveChunk(state, candidate.slice(32)), []);
     const flushed = mod.flushToolSieve(state, [{ type: "function", function: { name: "Read", parameters: { type: "object" } } }]);
     assert.equal(flushed.toolCalls[0].function.name, "Read");
     assert.match(flushed.toolCalls[0].function.arguments, /README\.md/);
@@ -297,6 +323,18 @@ export const cases = [
     const emitted = mod.processToolSieveChunk(state, oversizedTail);
     assert.equal(emitted.join(""), "unterminated candidate " + oversizedTail);
     assert.equal(state.buffer, "");
+    assert.equal(state.holdingToolCandidate, false);
+  }],
+  ["releases oversized partial tool tag candidates as plain text", async () => {
+    const state = mod.createToolSieveState();
+    const prefix = "<tool_calls ";
+    assert.deepEqual(mod.processToolSieveChunk(state, prefix), []);
+
+    const oversizedTail = "x".repeat(256 * 1024 + 1);
+    const emitted = mod.processToolSieveChunk(state, oversizedTail);
+    assert.equal(emitted.join(""), prefix + oversizedTail);
+    assert.equal(state.buffer, "");
+    assert.equal(state.heldLength, 0);
     assert.equal(state.holdingToolCandidate, false);
   }],
   ["holds markdown tool-call fences until they are safe to flush", async () => {

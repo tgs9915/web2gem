@@ -302,10 +302,24 @@ export function jsonValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function jsonArrayItemsUnique(values: unknown[]): boolean {
+  const primitiveSeen = new Set<string>();
+  let allPrimitive = true;
+  for (const value of values) {
+    const key = jsonPrimitiveValueKey(value);
+    if (key == null) {
+      allPrimitive = false;
+      break;
+    }
+    if (primitiveSeen.has(key)) return false;
+    primitiveSeen.add(key);
+  }
+  if (allPrimitive) return true;
+
   const seen = new Set<string>();
+  const stableKeyPath = new Set<object>();
   const fallbackValues: unknown[] = [];
   for (const value of values) {
-    const key = jsonStableValueKey(value);
+    const key = jsonStableValueKey(value, stableKeyPath);
     if (key == null) {
       for (const prev of fallbackValues) {
         if (jsonValuesEqual(value, prev)) return false;
@@ -319,11 +333,18 @@ function jsonArrayItemsUnique(values: unknown[]): boolean {
   return true;
 }
 
-function jsonStableValueKey(value: unknown, seen: Set<object> = new Set()): string | null {
+function jsonPrimitiveValueKey(value: unknown): string | null {
   if (value === null) return "null";
   if (typeof value === "string") return `string:${JSON.stringify(value)}`;
   if (typeof value === "boolean") return `boolean:${value ? 1 : 0}`;
   if (typeof value === "number") return Number.isFinite(value) ? `number:${String(value)}` : null;
+  return null;
+}
+
+function jsonStableValueKey(value: unknown, seen: Set<object> = new Set()): string | null {
+  const primitiveKey = jsonPrimitiveValueKey(value);
+  if (primitiveKey != null) return primitiveKey;
+  if (typeof value === "number") return null;
   if (Array.isArray(value)) {
     if (seen.has(value)) return null;
     seen.add(value);

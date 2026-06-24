@@ -1,7 +1,7 @@
 import { createTokenCounter } from "../shared/tokens";
 import type { TokenCharCounts } from "../shared/tokens";
 import { isAbortError } from "../shared/runtime";
-import { createToolSieveState, flushToolSieve, processToolSieveChunk } from "../toolstream";
+import { createToolSieveState, flushToolSieve, processToolSieveChunk, toolSieveBufferedText } from "../toolstream";
 import { validateRequiredToolCalls } from "../toolcall/policy-openai";
 import type { CompletionProvider, CompletionTextInput } from "./ports";
 import type { OpenAIToolCall } from "../toolcall/openai-format";
@@ -210,12 +210,13 @@ export async function consumeBufferedToolTextDeltas(
     errMsg = errorMessage(e);
   }
 
+  const bufferedText = toolSieveBufferedText(state);
   return {
     emittedText,
     streamErr,
     errMsg,
     completionTokens: completionTokenCounter.tokens(),
-    bufferedText: state.buffer,
+    bufferedText,
   };
 }
 
@@ -243,10 +244,11 @@ export async function* streamBufferedToolTextCompletionEvents(
     streamErr = e;
   }
 
-  if (state.buffer) yield { type: "buffered_text", text: state.buffer };
+  const bufferedText = toolSieveBufferedText(state);
+  if (bufferedText) yield { type: "buffered_text", text: bufferedText };
   if (streamErr) {
     yield streamErrorEvent(streamErr, emittedText);
-  } else if (!emittedText && !state.buffer) {
+  } else if (!emittedText && !bufferedText) {
     yield { type: "empty" };
   }
   yield { type: "done", emittedText, completionTokens: completionTokenCounter.tokens(), completionCounts: completionTokenCounter.counts() };

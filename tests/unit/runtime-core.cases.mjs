@@ -491,10 +491,30 @@ export const cases = [
     assert.equal(dec.decode(queue.readLineIfAvailable()), "two");
     assert.equal(dec.decode(queue.read(4)), "tail");
     assert.equal(queue.length, 0);
+
+    const splitQueue = mod.createByteQueue(enc.encode("ab"));
+    splitQueue.push(enc.encode("cd\r"));
+    assert.equal(splitQueue.readLineIfAvailable(), null);
+    splitQueue.push(enc.encode("\nrest"));
+    assert.equal(dec.decode(splitQueue.readLineIfAvailable()), "abcd");
+    assert.equal(dec.decode(splitQueue.read(4)), "rest");
+
+    const chunkSizeQueue = mod.createByteQueue(enc.encode(" a;"));
+    chunkSizeQueue.push(enc.encode("ext=1\r\nbody"));
+    assert.deepEqual(chunkSizeQueue.readHttpChunkSizeLineIfAvailable(), { size: 10, errorLine: "a" });
+    assert.equal(dec.decode(chunkSizeQueue.read(4)), "body");
   }],
   ["validates structured output const enum and uniqueness", async () => {
     assert.equal(mod.jsonValuesEqual({ a: 1, b: [2, { c: true }] }, { b: [2, { c: true }], a: 1 }), true);
     assert.equal(mod.jsonValuesEqual({ a: 1 }, { a: 1, b: 2 }), false);
+    assert.equal(mod.validateStructuredOutputValue(
+      [1, "1", true, false, null],
+      { type: "json_schema", schema: { type: "array", uniqueItems: true } },
+    ), "");
+    assert.equal(mod.validateStructuredOutputValue(
+      ["x", "x"],
+      { type: "json_schema", schema: { type: "array", uniqueItems: true } },
+    ), "$ must contain unique items");
     assert.equal(mod.validateStructuredOutputValue(
       { b: 2, a: 1 },
       { type: "json_schema", schema: { const: { a: 1, b: 2 } } },

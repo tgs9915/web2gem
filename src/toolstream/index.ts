@@ -16,6 +16,9 @@ export type ToolSieveState = {
   parsedToolCandidate: boolean;
   candidateStart: number;
   confirmedToolCandidate: boolean;
+  heldChunks?: string[];
+  heldLength?: number;
+  heldTail?: string;
 };
 
 export type ToolSieveFlushResult = {
@@ -24,7 +27,17 @@ export type ToolSieveFlushResult = {
 };
 
 export function createToolSieveState(): ToolSieveState {
-  return { buffer: "", holdingToolCandidate: false, sawToolClose: false, parsedToolCandidate: false, candidateStart: -1, confirmedToolCandidate: false };
+  return {
+    buffer: "",
+    holdingToolCandidate: false,
+    sawToolClose: false,
+    parsedToolCandidate: false,
+    candidateStart: -1,
+    confirmedToolCandidate: false,
+    heldChunks: [],
+    heldLength: 0,
+    heldTail: "",
+  };
 }
 
 export const TOOL_SIEVE_PLAIN_TEXT_KEEP = 64;
@@ -52,12 +65,14 @@ export function processToolSieveChunk(state: ToolSieveState | null | undefined, 
   if (!state) state = createToolSieveState();
   ensureToolSieveStateShape(state);
   const incoming = String(chunk || "");
-  const tail = state.buffer ? state.buffer.slice(-128) : "";
+  if (state.holdingToolCandidate) {
+    const tail = state.heldTail || (state.buffer ? state.buffer.slice(-128) : "");
+    appendHeldChunk(state, incoming);
+    if (hasToolCallCloseSyntax(tail + incoming)) state.sawToolClose = true;
+    return processHeldToolCandidate(state);
+  }
   state.buffer += incoming;
-  if (state.holdingToolCandidate && hasToolCallCloseSyntax(tail + incoming)) state.sawToolClose = true;
   if (!state.buffer) return [];
-
-  if (state.holdingToolCandidate) return processHeldToolCandidate(state);
 
   const plainPrefix = flushToolSievePlainPrefix(state);
   if (plainPrefix) return plainPrefix;
@@ -68,10 +83,12 @@ export function processToolSieveChunk(state: ToolSieveState | null | undefined, 
     state.sawToolClose = hasToolCallCloseSyntax(state.buffer.slice(start));
     state.parsedToolCandidate = false;
     state.candidateStart = 0;
-    state.confirmedToolCandidate = hasCompleteToolCandidateOpenPrefix(state.buffer.slice(start));
+    const candidate = state.buffer.slice(start);
+    state.confirmedToolCandidate = hasCompleteToolCandidateOpenPrefix(candidate);
+    setHeldText(state, candidate);
     if (start === 0) return [];
     const out = state.buffer.slice(0, start);
-    state.buffer = state.buffer.slice(start);
+    state.buffer = candidate;
     return out ? [out] : [];
   }
 
@@ -95,41 +112,62 @@ export function processToolSieveChunk(state: ToolSieveState | null | undefined, 
 }
 
 function processHeldToolCandidate(state: ToolSieveState): string[] {
-  if (!state.confirmedToolCandidate && isPartialToolMarkupPrefix(state.buffer)) return [];
   if (state.parsedToolCandidate) return [];
   if (!state.confirmedToolCandidate) {
-    if (state.sawToolClose && /^\s*<\s*\/\s*(?:\|DSML\|)?tool_calls\s*>\s*$/i.test(state.buffer)) return [];
-    state.confirmedToolCandidate = findToolSieveCandidateStart(state.buffer) === 0;
-    if (!state.confirmedToolCandidate) {
-      const out = state.buffer;
+    const prefix = heldPrefixText(state, 512);
+    if (isPartialToolMarkupPrefix(prefix)) {
+      if (heldLength(state) <= TOOL_SIEVE_MAX_CANDIDATE_CHARS) return [];
+      const out = releaseHeldText(state);
+      resetToolCandidateState(state);
+      return out ? [out] : [];
+    }
+    if (state.sawToolClose && heldLength(state) <= prefix.length && /^\s*<\s*\/\s*(?:\|DSML\|)?tool_calls\s*>\s*$/i.test(prefix)) return [];
+    state.confirmedToolCandidate = findToolSieveCandidateStart(prefix) === 0;
+    if (state.confirmedToolCandidate) {
+      if (!state.sawToolClose) return [];
+    } else {
+      const out = releaseHeldText(state);
       resetToolCandidateState(state);
       return out ? [out] : [];
     }
   }
   if (!state.sawToolClose) {
-    if (state.buffer.length <= TOOL_SIEVE_MAX_CANDIDATE_CHARS) return [];
-    const out = state.buffer;
+    if (heldLength(state) <= TOOL_SIEVE_MAX_CANDIDATE_CHARS) return [];
+    const out = releaseHeldText(state);
     resetToolCandidateState(state);
     return out ? [out] : [];
   }
-  if (/^\s*<\s*\/\s*(?:\|DSML\|)?tool_calls\s*>\s*$/i.test(state.buffer)) return [];
-  const parsed = parseDSMLToolCallsDetailed(state.buffer);
+
+  const text = heldText(state);
+  if (!state.confirmedToolCandidate) {
+    if (state.sawToolClose && /^\s*<\s*\/\s*(?:\|DSML\|)?tool_calls\s*>\s*$/i.test(text)) return [];
+    state.confirmedToolCandidate = findToolSieveCandidateStart(text) === 0;
+    if (!state.confirmedToolCandidate) {
+      const out = releaseHeldText(state);
+      resetToolCandidateState(state);
+      return out ? [out] : [];
+    }
+  }
+  if (/^\s*<\s*\/\s*(?:\|DSML\|)?tool_calls\s*>\s*$/i.test(text)) return [];
+  const parsed = parseDSMLToolCallsDetailed(text);
   if (parsed.calls.length) {
     state.parsedToolCandidate = true;
     return [];
   }
   if (parsed.sawToolCallSyntax) {
-    if (hasCompleteToolCandidateOpenPrefix(state.buffer)) return [];
-    const out = state.buffer;
+    if (hasCompleteToolCandidateOpenPrefix(text)) return [];
+    const out = releaseHeldText(state);
     resetToolCandidateState(state);
     return out ? [out] : [];
   }
+  state.buffer = releaseHeldText(state);
   resetToolCandidateFlags(state);
   return processToolSieveChunk(state, "");
 }
 
 function resetToolCandidateState(state: ToolSieveState): void {
   state.buffer = "";
+  clearHeldText(state);
   resetToolCandidateFlags(state);
 }
 
@@ -143,10 +181,15 @@ function resetToolCandidateFlags(state: ToolSieveState): void {
 
 function ensureToolSieveStateShape(state: ToolSieveState): void {
   if (!Number.isInteger(state.candidateStart)) state.candidateStart = state.holdingToolCandidate ? 0 : -1;
+  if (!Array.isArray(state.heldChunks)) state.heldChunks = [];
+  if (!Number.isFinite(state.heldLength || 0)) state.heldLength = 0;
+  if (typeof state.heldTail !== "string") state.heldTail = "";
+  if (state.holdingToolCandidate && !state.heldChunks.length && state.buffer) setHeldText(state, state.buffer);
   if (typeof state.confirmedToolCandidate !== "boolean") {
-    const start = findToolSieveCandidateStart(state.buffer);
+    const text = heldText(state);
+    const start = findToolSieveCandidateStart(text);
     state.confirmedToolCandidate = state.holdingToolCandidate
-      && ((state.sawToolClose && start < 0) || (start === 0 && hasCompleteToolCandidateOpenPrefix(state.buffer)));
+      && ((state.sawToolClose && start < 0) || (start === 0 && hasCompleteToolCandidateOpenPrefix(text)));
   }
 }
 
@@ -154,10 +197,68 @@ function hasCompleteToolCandidateOpenPrefix(text: unknown): boolean {
   return COMPLETE_TOOL_CANDIDATE_OPEN_RE.test(String(text || ""));
 }
 
+function setHeldText(state: ToolSieveState, text: string): void {
+  state.heldChunks = text ? [text] : [];
+  state.heldLength = text.length;
+  state.heldTail = text.slice(-128);
+}
+
+function appendHeldChunk(state: ToolSieveState, text: string): void {
+  if (!text) return;
+  if (!Array.isArray(state.heldChunks)) state.heldChunks = [];
+  state.heldChunks.push(text);
+  state.heldLength = (state.heldLength || 0) + text.length;
+  state.heldTail = `${state.heldTail || ""}${text}`.slice(-128);
+}
+
+function heldLength(state: ToolSieveState): number {
+  return state.heldLength || state.buffer.length;
+}
+
+function heldText(state: ToolSieveState): string {
+  const chunks = state.heldChunks || [];
+  if (!chunks.length) return state.buffer;
+  if (chunks.length === 1) return chunks[0] || "";
+  const text = chunks.join("");
+  setHeldText(state, text);
+  state.buffer = text;
+  return text;
+}
+
+function heldPrefixText(state: ToolSieveState, maxLength: number): string {
+  const chunks = state.heldChunks || [];
+  if (!chunks.length) return state.buffer.slice(0, maxLength);
+  let out = "";
+  for (const chunk of chunks) {
+    if (out.length + chunk.length >= maxLength) return out + chunk.slice(0, maxLength - out.length);
+    out += chunk;
+  }
+  return out;
+}
+
+function releaseHeldText(state: ToolSieveState): string {
+  const text = heldText(state);
+  clearHeldText(state);
+  return text;
+}
+
+function clearHeldText(state: ToolSieveState): void {
+  state.heldChunks = [];
+  state.heldLength = 0;
+  state.heldTail = "";
+}
+
 export function flushToolSieve(state: ToolSieveState | null | undefined, toolsRaw: unknown): ToolSieveFlushResult {
-  const buffered = state ? state.buffer : "";
+  if (state) ensureToolSieveStateShape(state);
+  const buffered = state ? heldText(state) : "";
   if (!buffered) return { text: "", toolCalls: null };
   if (findToolSieveCandidateStart(buffered) < 0) return { text: buffered, toolCalls: null };
   const [clean, toolCalls] = parseToolCalls(buffered, toolsRaw);
   return { text: clean, toolCalls: toolCalls.length ? toolCalls : null };
+}
+
+export function toolSieveBufferedText(state: ToolSieveState | null | undefined): string {
+  if (!state) return "";
+  ensureToolSieveStateShape(state);
+  return heldText(state);
 }

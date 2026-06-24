@@ -46,6 +46,7 @@ export type ByteQueue = {
   read(n: unknown): ByteChunk;
   readLine(): ByteChunk | null;
   readLineIfAvailable(): ByteChunk | null;
+  readHttpChunkSizeLineIfAvailable(): { size: number; errorLine: string } | null;
   skipCRLF(): boolean;
   drain(controller: ReadableStreamDefaultController<ByteChunk>): void;
 };
@@ -54,4 +55,3 @@ export type SocketTimeoutScope = {
   wait<T>(promise: PromiseLike<T> | T, stage?: unknown): Promise<T>;
   clear(): void;
 };
-

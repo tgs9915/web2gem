@@ -16,6 +16,8 @@ import { openAIChatChunk, writeOpenAIChatUsageTokenChunk } from "./format";
 
 type StreamIssue = Extract<CompletionStreamEvent, { type: "warning" } | { type: "stream_error" }>;
 type ResolvedCompletionModel = Extract<ResolvedModel, { name: string }>;
+type OpenAIChatChunkWriter = (delta: Record<string, unknown>, finish: string | null) => void | Promise<void>;
+type OpenAIChatDeltaCoalescer = ReturnType<typeof createDeltaCoalescer>;
 type OpenAIChatPlainStreamParams = {
   provider: CompletionProvider;
   id: string;
@@ -54,26 +56,14 @@ export async function streamOpenAIChatPlain(write: SSEWrite, cfg: RuntimeConfig,
       completionCounts = event.completionCounts;
     }
   }
-  const flushed = deltaCoalescer.flush();
-  if (flushed) await flushed;
+  await flushOpenAIChatDeltas(deltaCoalescer);
 
   if ((issue && issue.type === "stream_error") || empty) {
-    const note = issue ? streamErrorText(issue.error) : EMPTY_UPSTREAM_MSG;
-    log(cfg, issue
-      ? `openai chat stream failed before output model=${rm.name} code=${upstreamErrorCode(issue.error) || "upstream_error"} error=${errorLogSummary(issue.error)}`
-      : `openai chat stream produced no content model=${rm.name}`);
-    extraTokenCounter.append(note);
-    await writeChunk({ content: note }, null);
+    await writeOpenAIChatFallback(writeChunk, cfg, rm, issue, extraTokenCounter);
   } else if (issue) {
-    const warning = "\n\n" + streamInterruptedWarningText(issue.error);
-    log(cfg, `openai chat stream interrupted after partial output model=${rm.name} code=${upstreamErrorCode(issue.error) || "stream_interrupted"} error=${errorLogSummary(issue.error)}`);
-    await writeStreamWarningEvent(write, issue.error, warning.trim());
-    extraTokenCounter.append(warning);
-    await writeChunk({ content: warning }, null);
+    await writeOpenAIChatInterrupted(write, writeChunk, cfg, rm, issue, extraTokenCounter);
   }
-  await writeChunk({}, "stop");
-  if (includeUsage) await writeOpenAIChatUsageTokenChunk(write, id, model, promptTokens, combinedTokenCount(completionCounts, extraTokenCounter));
-  await write("data: [DONE]\n\n");
+  await finishOpenAIChatStream(write, writeChunk, id, model, includeUsage, promptTokens, completionCounts, extraTokenCounter);
 }
 
 export async function streamOpenAIChatWithToolSieve(write: SSEWrite, _cfg: RuntimeConfig, params: OpenAIChatToolSieveStreamParams) {
@@ -106,23 +96,18 @@ export async function streamOpenAIChatWithToolSieve(write: SSEWrite, _cfg: Runti
       completionCounts = event.completionCounts;
     }
   }
-  let flushed = deltaCoalescer.flush();
-  if (flushed) await flushed;
+  await flushOpenAIChatDeltas(deltaCoalescer);
 
   if (violation) {
-    flushed = deltaCoalescer.flush();
-    if (flushed) await flushed;
+    await flushOpenAIChatDeltas(deltaCoalescer);
     log(_cfg, `openai chat stream tool policy violation model=${rm.name} code=${violation.code}`);
     extraTokenCounter.append(violation.message);
     await writeChunk({ content: violation.message }, null);
-    await writeChunk({}, "stop");
-    if (includeUsage) await writeOpenAIChatUsageTokenChunk(write, id, model, promptTokens, combinedTokenCount(completionCounts, extraTokenCounter));
-    await write("data: [DONE]\n\n");
+    await finishOpenAIChatStream(write, writeChunk, id, model, includeUsage, promptTokens, completionCounts, extraTokenCounter);
     return;
   }
   if (toolCalls && toolCalls.length) {
-    flushed = deltaCoalescer.flush();
-    if (flushed) await flushed;
+    await flushOpenAIChatDeltas(deltaCoalescer);
     if (issue) {
       log(_cfg, `openai chat stream interrupted after tool calls model=${rm.name} code=${upstreamErrorCode(issue.error) || "stream_interrupted"} error=${errorLogSummary(issue.error)}`);
       await writeStreamWarningEvent(write, issue.error);
@@ -132,23 +117,64 @@ export async function streamOpenAIChatWithToolSieve(write: SSEWrite, _cfg: Runti
     extraTokenCounter.append(JSON.stringify(toolCalls));
   } else {
     if (!emittedText || empty) {
-      const note = issue ? streamErrorText(issue.error) : EMPTY_UPSTREAM_MSG;
-      log(_cfg, issue
-        ? `openai chat stream failed before output model=${rm.name} code=${upstreamErrorCode(issue.error) || "upstream_error"} error=${errorLogSummary(issue.error)}`
-        : `openai chat stream produced no content model=${rm.name}`);
-      extraTokenCounter.append(note);
-      await writeChunk({ content: note }, null);
+      await writeOpenAIChatFallback(writeChunk, _cfg, rm, issue, extraTokenCounter);
     } else if (issue) {
-      const warning = "\n\n" + streamInterruptedWarningText(issue.error);
-      log(_cfg, `openai chat stream interrupted after partial output model=${rm.name} code=${upstreamErrorCode(issue.error) || "stream_interrupted"} error=${errorLogSummary(issue.error)}`);
-      await writeStreamWarningEvent(write, issue.error, warning.trim());
-      extraTokenCounter.append(warning);
-      await writeChunk({ content: warning }, null);
+      await writeOpenAIChatInterrupted(write, writeChunk, _cfg, rm, issue, extraTokenCounter);
     }
     await writeChunk({}, "stop");
   }
   if (includeUsage) await writeOpenAIChatUsageTokenChunk(write, id, model, promptTokens, combinedTokenCount(completionCounts, extraTokenCounter));
   await write("data: [DONE]\n\n");
+}
+
+async function flushOpenAIChatDeltas(coalescer: OpenAIChatDeltaCoalescer): Promise<void> {
+  const flushed = coalescer.flush();
+  if (flushed) await flushed;
+}
+
+async function finishOpenAIChatStream(
+  write: SSEWrite,
+  writeChunk: OpenAIChatChunkWriter,
+  id: string,
+  model: string,
+  includeUsage: boolean,
+  promptTokens: number,
+  completionCounts: ReturnType<typeof emptyTokenCounts>,
+  extraTokenCounter: ReturnType<typeof createTokenCounter>,
+): Promise<void> {
+  await writeChunk({}, "stop");
+  if (includeUsage) await writeOpenAIChatUsageTokenChunk(write, id, model, promptTokens, combinedTokenCount(completionCounts, extraTokenCounter));
+  await write("data: [DONE]\n\n");
+}
+
+async function writeOpenAIChatFallback(
+  writeChunk: OpenAIChatChunkWriter,
+  cfg: RuntimeConfig,
+  rm: ResolvedCompletionModel,
+  issue: StreamIssue | null,
+  extraTokenCounter: ReturnType<typeof createTokenCounter>,
+): Promise<void> {
+  const note = issue ? streamErrorText(issue.error) : EMPTY_UPSTREAM_MSG;
+  log(cfg, issue
+    ? `openai chat stream failed before output model=${rm.name} code=${upstreamErrorCode(issue.error) || "upstream_error"} error=${errorLogSummary(issue.error)}`
+    : `openai chat stream produced no content model=${rm.name}`);
+  extraTokenCounter.append(note);
+  await writeChunk({ content: note }, null);
+}
+
+async function writeOpenAIChatInterrupted(
+  write: SSEWrite,
+  writeChunk: OpenAIChatChunkWriter,
+  cfg: RuntimeConfig,
+  rm: ResolvedCompletionModel,
+  issue: StreamIssue,
+  extraTokenCounter: ReturnType<typeof createTokenCounter>,
+): Promise<void> {
+  const warning = "\n\n" + streamInterruptedWarningText(issue.error);
+  log(cfg, `openai chat stream interrupted after partial output model=${rm.name} code=${upstreamErrorCode(issue.error) || "stream_interrupted"} error=${errorLogSummary(issue.error)}`);
+  await writeStreamWarningEvent(write, issue.error, warning.trim());
+  extraTokenCounter.append(warning);
+  await writeChunk({ content: warning }, null);
 }
 
 function openAIStreamToolCallInput(toolCall: OpenAIToolCall): { name: unknown; input: unknown } {

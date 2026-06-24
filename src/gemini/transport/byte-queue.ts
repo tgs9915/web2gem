@@ -74,6 +74,82 @@ export function createByteQueue(initial?: ByteChunk | null): ByteQueue {
     resetScan();
     return value;
   };
+  const consumeLine = (lineLength: number, consumeLength: number): ByteChunk => {
+    compact();
+    const out = lineLength > 0 ? new Uint8Array(lineLength) : new Uint8Array(0);
+    let copied = 0;
+    let remaining = consumeLength;
+    while (remaining > 0) {
+      compact();
+      const first = chunks[headIndex];
+      if (!first) break;
+      const take = Math.min(remaining, first.length - headOffset);
+      const copy = Math.min(take, lineLength - copied);
+      if (copy > 0) {
+        out.set(first.subarray(headOffset, headOffset + copy), copied);
+        copied += copy;
+      }
+      headOffset += take;
+      length -= take;
+      remaining -= take;
+    }
+    compact();
+    resetScan();
+    return out;
+  };
+  const consumeHttpChunkSizeLine = (lineLength: number, consumeLength: number): { size: number; errorLine: string } => {
+    compact();
+    let copied = 0;
+    let remaining = consumeLength;
+    let size = 0;
+    let digits = 0;
+    let invalid = false;
+    let afterDigitWhitespace = false;
+    let inExtension = false;
+    let errorLine = "";
+
+    const parseByte = (b: number | undefined) => {
+      if (b === undefined || inExtension) return;
+      if (b === 59) {
+        if (digits <= 0 || afterDigitWhitespace) invalid = true;
+        inExtension = true;
+        return;
+      }
+      if (errorLine.length < 80) errorLine += b >= 32 && b <= 126 ? String.fromCharCode(b) : "?";
+      if (isHttpWhitespaceByte(b)) {
+        if (digits > 0) afterDigitWhitespace = true;
+        return;
+      }
+      if (afterDigitWhitespace) {
+        invalid = true;
+        return;
+      }
+      const nibble = hexNibbleByte(b);
+      if (nibble < 0) {
+        invalid = true;
+        return;
+      }
+      digits += 1;
+      size = size * 16 + nibble;
+      if (!Number.isSafeInteger(size)) invalid = true;
+    };
+
+    while (remaining > 0) {
+      compact();
+      const first = chunks[headIndex];
+      if (!first) break;
+      const take = Math.min(remaining, first.length - headOffset);
+      const parse = Math.min(take, lineLength - copied);
+      for (let i = 0; i < parse; i++) parseByte(first[headOffset + i]);
+      copied += parse;
+      headOffset += take;
+      length -= take;
+      remaining -= take;
+    }
+    compact();
+    resetScan();
+    return { size: invalid || digits <= 0 ? -1 : size, errorLine: trimHttpChunkSizeErrorLine(errorLine) };
+  };
   const api: ByteQueue = {
     get length() { return length; },
     push(chunk: ByteChunk | null | undefined) {
@@ -149,11 +225,39 @@ export function createByteQueue(initial?: ByteChunk | null): ByteQueue {
           const b = chunk[i];
           if (b === undefined) continue;
           if (scanPrev === 13 && b === 10) {
-            const line = api.read(scanBytes - 1);
-            api.skipCRLF();
-            resetScan();
-            return line;
+            return consumeLine(scanBytes - 1, scanBytes + 1);
           }
+          scanPrev = b;
+          scanBytes += 1;
+          scanChunkIndex = c;
+          scanOffset = i + 1;
+        }
+        scanChunkIndex = c + 1;
+        scanOffset = 0;
+      }
+      return null;
+    },
+    readHttpChunkSizeLineIfAvailable() {
+      compact();
+      if (
+        !scanActive
+        || scanChunkIndex < headIndex
+        || (scanChunkIndex === headIndex && scanOffset < headOffset)
+      ) {
+        scanActive = true;
+        scanChunkIndex = headIndex;
+        scanOffset = headOffset;
+        scanBytes = 0;
+        scanPrev = -1;
+      }
+      for (let c = scanChunkIndex; c < chunks.length; c++) {
+        const chunk = chunks[c];
+        if (!chunk) continue;
+        const start = c === scanChunkIndex ? scanOffset : (c === headIndex ? headOffset : 0);
+        for (let i = start; i < chunk.length; i++) {
+          const b = chunk[i];
+          if (b === undefined) continue;
+          if (scanPrev === 13 && b === 10) return consumeHttpChunkSizeLine(scanBytes - 1, scanBytes + 1);
           scanPrev = b;
           scanBytes += 1;
           scanChunkIndex = c;
@@ -189,3 +293,19 @@ export function createByteQueue(initial?: ByteChunk | null): ByteQueue {
   return api;
 }
 
+function isHttpWhitespaceByte(value: number | undefined): boolean {
+  return value === 32 || value === 9;
+}
+
+function hexNibbleByte(value: number | undefined): number {
+  if (value === undefined) return -1;
+  if (value >= 48 && value <= 57) return value - 48;
+  if (value >= 65 && value <= 70) return value - 55;
+  if (value >= 97 && value <= 102) return value - 87;
+  return -1;
+}
+
+function trimHttpChunkSizeErrorLine(value: string): string {
+  const semi = value.indexOf(";");
+  return (semi >= 0 ? value.slice(0, semi) : value).trim();
+}

@@ -1,5 +1,4 @@
 import { createByteQueue } from "./byte-queue";
-import { chunkSizeLineForError, parseHttpChunkSizeLine } from "./http-parse";
 import type { ByteChunk, SocketTimeoutScope } from "./socket-types";
 
 type SocketBodyStreamOptions = {
@@ -43,6 +42,14 @@ export function createSocketBodyStream({
     }
     return line;
   };
+  const readAvailableChunkSize = async () => {
+    let parsed = queue.readHttpChunkSizeLineIfAvailable();
+    while (parsed === null) {
+      if (!(await pullToQueue())) return null;
+      parsed = queue.readHttpChunkSizeLineIfAvailable();
+    }
+    return parsed;
+  };
 
   const closeController = (controller: ReadableStreamDefaultController<ByteChunk>) => {
     if (bodyDone) return;
@@ -76,10 +83,10 @@ export function createSocketBodyStream({
               }
               return;
             }
-            const line = await readAvailableLine();
-            if (line === null) throw new Error("socket: incomplete chunked body");
-            chunkRemaining = parseHttpChunkSizeLine(line);
-            if (chunkRemaining < 0) throw new Error(`socket: invalid chunk size: ${chunkSizeLineForError(line)}`);
+            const parsedSize = await readAvailableChunkSize();
+            if (parsedSize === null) throw new Error("socket: incomplete chunked body");
+            chunkRemaining = parsedSize.size;
+            if (chunkRemaining < 0) throw new Error(`socket: invalid chunk size: ${parsedSize.errorLine}`);
             if (chunkRemaining === 0) {
               for (;;) {
                 const trailer = await readAvailableLine();
@@ -123,4 +130,3 @@ export function createSocketBodyStream({
     cancel() { cleanupBody(false); },
   });
 }
-
