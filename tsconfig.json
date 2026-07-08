@@ -3,7 +3,7 @@
     "target": "ES2025",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2025", "WebWorker"],
+    "lib": ["ES2025"],
     "types": ["@cloudflare/workers-types"],
     "strict": true,
     "exactOptionalPropertyTypes": true,

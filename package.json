@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
-  "packageManager": "pnpm@11.6.0",
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "build": "node scripts/build.mjs",
     "check:static": "biome lint --diagnostic-level=error",
@@ -26,12 +26,12 @@
     "deploy": "pnpm build && wrangler deploy"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@cloudflare/workers-types": "^4.20260619.1",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@biomejs/biome": "^2.5.3",
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "esbuild": "^0.28.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.102.0"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.1"
   }
 }

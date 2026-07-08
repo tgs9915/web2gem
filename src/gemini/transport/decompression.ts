@@ -1,9 +1,11 @@
+type SupportedCompressionFormat = "gzip";
+
 export function socketAcceptEncoding(acceptCompressed: boolean): string {
   if (!acceptCompressed) return "identity";
   return "gzip";
 }
 
-export function contentDecompressionFormat(raw: string | null): CompressionFormat | null {
+export function contentDecompressionFormat(raw: string | null): SupportedCompressionFormat | null {
   const value = String(raw || "").trim().toLowerCase();
   if (value === "gzip" || value === "x-gzip") return "gzip";
   return null;

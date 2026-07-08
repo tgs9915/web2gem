@@ -191,7 +191,7 @@ Secrets are optional. In the Worker dashboard, open the Worker settings and add 
 
 ![Cloudflare Worker settings showing secrets](./docs/images/cloudflare-worker-settings-secrets-GEMINI_COOKIE.png)
 
-If you build from source instead of using a release artifact, `pnpm deploy` builds `dist/worker.js` and deploys it through the checked-in `wrangler.toml`.
+If you build from source instead of using a release artifact, `pnpm deploy` builds `dist/worker.js` and deploys it through the checked-in `wrangler.jsonc`.
 
 ### Option 2: Deploy with Docker
 
@@ -351,7 +351,7 @@ pnpm docker:smoke
 │   ├── toolcall/            # Tool-call prompt, policy, parser, formatter
 │   └── toolstream/          # Streamed tool-call detection state
 ├── tests/unit/              # Local unit checks
-├── wrangler.toml            # Cloudflare Worker deployment config
+├── wrangler.jsonc           # Cloudflare Worker deployment config
 └── package.json             # Node scripts and dev dependencies
 ```
 

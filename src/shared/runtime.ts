@@ -2,7 +2,7 @@ import type { ErrorWithMetadata } from "./types";
 
 export const TEXT_ENCODER = new TextEncoder();
 export const TEXT_DECODER = new TextDecoder();
-export const UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true });
+export const UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 
 // ─── 小工具 ──────────────────────────────────────────────────────────────────
 type LogConfig = { log_requests?: unknown } | null | undefined;

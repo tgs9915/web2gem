@@ -1,7 +1,7 @@
 FROM node:26-alpine AS deps
 
 WORKDIR /app
-ARG PNPM_VERSION=11.6.0
+ARG PNPM_VERSION=11.10.0
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -9,7 +9,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 
-COPY tsconfig.json vitest.config.mjs wrangler.toml ./
+COPY tsconfig.json vitest.config.mjs wrangler.jsonc ./
 COPY scripts ./scripts
 COPY src ./src
 RUN pnpm build

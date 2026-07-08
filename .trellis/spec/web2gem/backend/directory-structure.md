@@ -301,7 +301,7 @@ Use this contract when changing build outputs, public exports, smoke tests, or l
 - `scripts/build.mjs` emits:
   - `dist/worker.js` from `src/index.ts`
   - `dist/worker.test.js` from `src/test-index.ts`
-- `wrangler.toml` deploys `dist/worker.js`.
+- `wrangler.jsonc` deploys `dist/worker.js`.
 - `tests/unit/*.test.mjs` are Vitest-discovered wrapper files; unit modules import `dist/worker.test.js` by default.
 - `tests/unit/*.cases.mjs` own reusable case lists imported by the Vitest wrapper files.
 - `tests/unit/assertions.js` provides Vitest-backed assertion helpers for shared case modules.
@@ -317,7 +317,7 @@ Use this contract when changing build outputs, public exports, smoke tests, or l
 
 - `dist/worker.js` exports `buildPayload` -> fail smoke; test helpers leaked into production.
 - `dist/worker.test.js` misses a helper required by `tests/unit/*` -> fail unit tests.
-- `wrangler.toml` points to `dist/worker.test.js` -> invalid deployment config.
+- `wrangler.jsonc` points to `dist/worker.test.js` -> invalid deployment config.
 - `scripts/build.mjs` only emits one bundle -> unit or smoke should fail before deploy.
 
 ### 5. Good/Base/Bad Cases
@@ -378,7 +378,7 @@ Use this contract when changing test coverage commands, build sourcemap behavior
 - Unit helpers read `process.env.TEST_BUNDLE` when set and default to `../../dist/worker.test.js` for the normal workflow.
 - Vitest V8 coverage is the coverage collector. Its sourcemapped bundle percentages are the baseline for global thresholds and `scripts/check-coverage.mjs` directory gates.
 - Generated coverage output belongs under `coverage/` and coverage build output belongs under `dist-coverage/`; both must stay git-ignored.
-- Do not change `src/index.ts`, `src/public-exports.ts`, or `wrangler.toml` to make coverage work.
+- Do not change `src/index.ts`, `src/public-exports.ts`, or `wrangler.jsonc` to make coverage work.
 
 ### 4. Validation & Error Matrix
 
