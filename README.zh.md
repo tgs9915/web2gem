@@ -2,20 +2,25 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-面向 Gemini Web 的 OpenAI 兼容和 Google Gemini 兼容 HTTP 适配器，可部署到 Cloudflare Workers，也可作为 Docker 服务自托管。零成本, 跨平台, 单文件。
+轻量级 Gemini Web API 网关，兼容 OpenAI 和 Google Gemini 接口。可以将单文件 Worker 部署到 Cloudflare，也可以使用 Docker 自托管，并按需启用 API 鉴权和基于 Gemini cookie 的功能。
 
-TypeScript 代码位于 `src/`，本地质量检查脚本位于 `scripts/`，`dist/worker.js` 由 `pnpm build` 生成并用于 Wrangler 部署，`scripts/docker-server.mjs` 提供 Docker HTTP 适配层。
+> 当前是 `main` 分支文档，对应轻量、无持久化存储的版本。如果需要多账号持久化和管理页面，请查看 [`gemini-account-pool`](https://github.com/Guardinary/web2gem/tree/gemini-account-pool)。
+
+[选择版本](#选择版本) · [部署到 Cloudflare](#方式一通过-release-单文件-worker-产物部署) · [使用 Docker](#方式二通过-docker-部署) · [API 示例](#api-接口)
 
 ## 目录
 
 - [web2gem](#web2gem)
   - [目录](#目录)
   - [概览](#概览)
+  - [选择版本](#选择版本)
   - [核心功能](#核心功能)
+  - [开始前准备](#开始前准备)
   - [API 接口](#api-接口)
     - [健康检查](#健康检查)
     - [OpenAI Chat Completions](#openai-chat-completions)
     - [OpenAI Responses](#openai-responses)
+    - [OpenAI Images API](#openai-images-api)
     - [Google Gemini API](#google-gemini-api)
   - [模型](#模型)
   - [快速开始](#快速开始)
@@ -23,6 +28,7 @@ TypeScript 代码位于 `src/`，本地质量检查脚本位于 `scripts/`，`di
     - [方式二：通过 Docker 部署](#方式二通过-docker-部署)
   - [配置](#配置)
   - [认证](#认证)
+  - [常见问题](#常见问题)
   - [开发](#开发)
   - [测试](#测试)
   - [项目结构](#项目结构)
@@ -32,7 +38,9 @@ TypeScript 代码位于 `src/`，本地质量检查脚本位于 `scripts/`，`di
 
 ## 概览
 
-`web2gem` 将常见 OpenAI 和 Google Gemini API 请求形状转换为 Gemini Web 请求。它既可以运行在 Cloudflare Workers 上，也可以作为 Docker 托管的 Node 服务运行。在 Workers 上，当常规 `fetch` 路径受到限流时，可以使用 `cloudflare:sockets` 作为上游 HTTP 传输方式；Docker 部署默认使用标准 `fetch` 传输。
+`web2gem` 让 OpenAI 兼容客户端和 Google Gemini 兼容客户端通过熟悉的 HTTP API 使用 Gemini Web。`main` 版本刻意保持简单：没有账号数据库和管理页面；需要 Gemini 认证能力时，通过一个运行时 `GEMINI_COOKIE` 提供凭据，并在可能时只在内存中刷新。
+
+它适合个人部署、简单代理，以及希望保持无状态小型运行时的用户。Cloudflare Workers 可以在普通 `fetch` 路径受限时使用 `cloudflare:sockets`；Docker 默认使用标准 `fetch`。
 
 主要兼容目标如下：
 
@@ -46,23 +54,48 @@ TypeScript 代码位于 `src/`，本地质量检查脚本位于 `scripts/`，`di
 | Google Models                       | 支持 | `GET /v1beta/models`, `GET /v1beta/models/{model}`                                                   |
 | 健康检查                            | 支持 | `GET /`                                                                                              |
 
+## 选择版本
+
+两个版本都提供常见的 OpenAI 兼容和 Google Gemini 兼容接口，并以不同分支独立发布。请按需要的存储方式自由选择；两者之间不存在必须遵循的升级关系。
+
+| | `main` | [`gemini-account-pool`](https://github.com/Guardinary/web2gem/tree/gemini-account-pool) |
+| --- | --- | --- |
+| 适合场景 | 轻量个人部署或单运行时部署。 | 需要管理多个账号的共享或长期运行部署。 |
+| Gemini 凭据 | 在运行时 secret 中可选配置单个 `GEMINI_COOKIE`，刷新状态只保存在内存中。 | 将多个 Gemini 账号持久化保存到 D1。 |
+| 持久化存储 | 不需要。 | 必须配置 `GEMINI_DB`；Docker 使用 D1 HTTP binding。 |
+| 账号管理 | 凭据变化时更新运行时 secret。 | 提供 `/admin` WebUI 和 `/admin/accounts` API。 |
+| 运行能力 | 配置最少，依赖更少。 | 支持账号选择、健康状态、冷却、刷新跟踪和脱敏诊断。 |
+| 公共 API 鉴权 | 可选 `API_KEYS`。 | 可选 `API_KEYS`，管理操作额外使用唯一 `ADMIN_KEY`。 |
+
+如果你只需要最简单的部署，并且不需要持久化账号池，请选择 `main`。如果你希望导入和管理多个账号，而不把账号直接存放在 Worker 或容器环境变量中，请选择 `gemini-account-pool`。
+
 ## 核心功能
 
-| 功能                  | 说明                                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Flash 模型开箱即用   | 无需任何鉴权，也无需任何配置，部署单文件即可开始使用flash模型，无用量限制，完全免费。                          |
-| OpenAI 兼容 API       | Chat Completions 和 Responses 端点，文本/工具调用流程支持流式输出。                                             |
-| Google 兼容 API       | 面向 Gemini 风格客户端的 `generateContent` 和 `streamGenerateContent` 路由。                                   |
-| 工具调用              | 将工具定义转换为提示词指令，并把 DSML/XML 风格工具调用输出解析回 API 响应。                                    |
-| 结构化输出            | 对非流式结构化响应进行最终 JSON 校验和规范化；默认拒绝流式结构化输出。                                         |
-| 大上下文处理          | 在配置 Gemini cookie 时，可将大段提示上下文作为 Gemini 文本附件上传。                                          |
-| 生图                  | 支持非流式 Chat/Responses 请求中的显式 OpenAI `image_generation` 元数据，以及 `/v1/images/generations`、`/v1/images/edits`。 |
-| 图片输入处理          | 通过 Gemini provider 路径解析用户提供的内联/base64 图片输入；Worker 不抓取远程图片或文件 URL。                 |
-| 通用文件附件          | 请求内 `input_file` 和非图片内联数据可通过 Gemini Web 上传引用传入，支持任意文件名和 MIME；不实现 `/v1/files` 持久文件服务。 |
-| Worker 和 Docker 部署 | 可通过 Wrangler 部署到 Cloudflare Workers，也可用 Docker / Docker Compose 自托管。                             |
-| 上游 socket 传输      | Workers 上默认使用 `cloudflare:sockets`；Docker 默认使用标准 `fetch` 传输，除非运行时提供兼容的 sockets 能力。 |
-| CORS 和 API key 保护  | 处理浏览器预检请求，并支持可选的 bearer/API-key 认证。                                                         |
-| 本地测试 bundle       | 构建独立的 `dist/worker.test.js`，让单元测试可检查内部实现，同时不把测试辅助导出泄漏到生产 bundle。            |
+| 功能 | 用户能获得什么 |
+| --- | --- |
+| 轻量部署 | 不需要数据库或管理服务，只需一个 Worker bundle 或一个 Docker 服务。 |
+| Flash 路由无需 cookie | 基础 Flash 使用不要求 `GEMINI_COOKIE`，但仍取决于上游 Gemini Web 的可用性。 |
+| OpenAI 兼容 API | 支持 Chat Completions、Responses、Images、模型列表、流式文本、工具调用和结构化输出。 |
+| Google 兼容 API | 支持 `generateContent`、`streamGenerateContent` 和 Gemini 风格模型列表。 |
+| 可选认证能力 | 配置一个 `GEMINI_COOKIE` 后，可使用 Pro 路由、生图/图片编辑、登录态行为和大上下文 Gemini 文本附件。 |
+| 请求内附件 | 支持内联图片和通用文件输入，但不实现持久化 `/v1/files` 服务。 |
+| Worker 与 Docker | 可部署到 Cloudflare Workers，也可使用 Docker / Docker Compose 自托管。 |
+| 可选公共鉴权 | 使用 `API_KEYS` 保护共享接口；私有或已有外围保护的部署可以留空。 |
+
+## 开始前准备
+
+只需要配置与你的用途相关的项目：
+
+| 目标 | 必需配置 |
+| --- | --- |
+| 尝试受支持的 Flash 路由 | 不需要 Gemini secret。 |
+| 保护共享接口 | 设置一个或多个 `API_KEYS`。 |
+| 使用真实 Pro 路由 | 设置 `GEMINI_COOKIE`；`SAPISID` 可选，通常可以自动提取。 |
+| 生成或编辑图片 | 设置 `GEMINI_COOKIE`。 |
+| 将大段提示词作为 Gemini 文本附件上传 | 设置 `GEMINI_COOKIE`。 |
+| 使用自定义转发源站 | 设置 `GEMINI_ORIGIN`。 |
+
+Gemini Web 属于可能随时变化的上游 Web 协议，本项目更适合个人、研究和内部使用场景。如果需要持久化多账号运行，请改用 [`gemini-account-pool`](https://github.com/Guardinary/web2gem/tree/gemini-account-pool) 版本。
 
 ## API 接口
 
@@ -202,7 +235,9 @@ cp .env.example .env
 docker compose up -d
 ```
 
-仓库提供的 [`compose.yaml`](compose.yaml) 默认拉取 `ghcr.io/guardinary/web2gem:latest`，映射 `${PORT:-52389}:${PORT:-52389}`，并从 `.env` 传入运行时变量。共享部署时在 `.env` 中设置 `API_KEYS`；需要 Pro 路由、大上下文文本附件或已登录 Gemini Web 行为时设置 `GEMINI_COOKIE`。如需固定镜像版本，可在 `.env` 中设置 `WEB2GEM_IMAGE=ghcr.io/guardinary/web2gem:<tag>`。
+在 PowerShell 中，请使用 `Copy-Item .env.example .env` 代替 `cp`。
+
+仓库提供的 [`compose.yaml`](compose.yaml) 默认拉取 `ghcr.io/guardinary/web2gem:latest`，映射 `${PORT:-52389}:${PORT:-52389}`，并从 `.env` 传入运行时变量。共享部署时设置 `API_KEYS`；需要 Pro 路由、生图/图片编辑、大上下文文本附件或其他已登录 Gemini Web 行为时设置 `GEMINI_COOKIE`。如需固定镜像版本，可设置 `WEB2GEM_IMAGE=ghcr.io/guardinary/web2gem:<tag>`。
 
 容器启动后，可验证本地健康检查路由：
 
@@ -255,7 +290,7 @@ docker run --rm -p 52389:52389 --env-file .env web2gem:<tag>
 使用 Wrangler CLI 管理 Worker 时，可通过以下命令设置可选 secrets：
 
 - 共享部署时设置 `API_KEYS`。为空时会关闭认证。
-- 需要 Pro 路由、大上下文文本附件或已登录 Gemini Web 行为时设置 `GEMINI_COOKIE`。
+- 需要 Pro 路由、生图/图片编辑、大上下文文本附件或其他已登录 Gemini Web 行为时设置 `GEMINI_COOKIE`。
 
 ```sh
 wrangler secret put API_KEYS
@@ -289,6 +324,17 @@ wrangler secret put GEMINI_COOKIE
 - `x-goog-api-key: <key>`
 
 健康检查路由 `GET /` 保持未认证，方便部署探针在没有 secrets 的情况下工作。
+
+## 常见问题
+
+| 现象 | 检查方式 |
+| --- | --- |
+| Pro 请求失败或回退 | 确认 `GEMINI_COOKIE` 包含当前的 `__Secure-1PSID` 和 `__Secure-1PSIDTS`。如果 Cookie 刷新已无法恢复，请更新 secret。 |
+| 没有使用大上下文附件 | 设置 `GEMINI_COOKIE`，并确认没有关闭 `CURRENT_INPUT_FILE_ENABLED`。 |
+| 共享接口返回 401 | 通过 `Authorization: Bearer`、`x-api-key` 或 `x-goog-api-key` 发送一个已配置的 `API_KEYS` 值。 |
+| Gemini 返回空内容 | 检查 `GEMINI_BL` 是否仍与当前 Gemini Web 前端一致。如果 Cloudflare 出口受限，配置兼容的 `GEMINI_ORIGIN`。 |
+| Docker 无法访问服务 | 检查 `${PORT:-52389}:${PORT:-52389}` 端口映射，并使用实际配置的宿主机端口。 |
+| 需要多个持久化账号 | 改用 [`gemini-account-pool`](https://github.com/Guardinary/web2gem/tree/gemini-account-pool)，不要尝试在 `GEMINI_COOKIE` 中放置多个账号。 |
 
 ## 开发
 
