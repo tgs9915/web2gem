@@ -265,6 +265,68 @@ tests
 docs
 ```
 
+## Scenario: Risk-Routed Pull Request Gates
+
+### 1. Scope / Trigger
+
+Use this contract when changing `.github/workflows/quality-gates.yml` or the local changed-file classifier.
+
+### 2. Signatures
+
+- `classifyChangedFiles(files)` returns `docs` or `runtime`.
+- `Classify Change Risk` exposes the boolean `runtime` job output.
+- `Required Gates - Ubuntu` remains the stable aggregate required-check name.
+
+### 3. Contracts
+
+- Every pull request triggers the workflow and classifier.
+- Only root README files, `LICENSE`, and paths under `docs/` are documentation-only; empty or unknown sets fail closed to `runtime`.
+- Source, tests, scripts, package/config, Docker, workflow, and `.trellis/spec/` changes run the full Ubuntu gates and Node matrix.
+- Pushes to `dev`/`main` and manual runs always classify as runtime-impacting.
+- Documentation-only PRs keep the Ubuntu required job present while skipping dependency installation, coverage, benchmarks, bundle checks, and the Node matrix.
+
+### 4. Validation & Error Matrix
+
+- `README.md` plus `docs/image.png` -> `docs`.
+- Any `.github/`, `.trellis/spec/`, `src/`, `tests/`, or `scripts/` path -> `runtime`.
+- No changed paths -> `runtime`.
+- Non-PR event -> `runtime` without diff classification.
+
+### 5. Good/Base/Bad Cases
+
+- Good: use `git diff --name-only -z` and the repository-owned Node classifier.
+- Base: preserve existing job display names and full release gates.
+- Bad: skip the whole workflow for Markdown paths, leaving required checks pending.
+- Bad: use a broad `*.md` allowlist that treats Trellis specs as documentation-only.
+
+### 6. Tests Required
+
+- Unit test representative docs-only, source, workflow, Trellis spec, test, and empty file sets.
+- Contract-test the workflow classifier pipe, stable Ubuntu job, lightweight docs step, and runtime-only Node matrix.
+- Run `actionlint` across every workflow file.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```yaml
+on:
+  pull_request:
+    paths-ignore: ["**/*.md"]
+```
+
+#### Correct
+
+```yaml
+jobs:
+  classify:
+    outputs:
+      runtime: ${{ steps.risk.outputs.runtime }}
+  ubuntu-quality:
+    name: Required Gates - Ubuntu
+    needs: classify
+```
+
 ---
 
 ## Validation
