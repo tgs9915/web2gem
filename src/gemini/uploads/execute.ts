@@ -26,11 +26,12 @@ import { bytesToHex } from "../../shared/crypto";
 import { TEXT_ENCODER, UTF8_FATAL_DECODER } from "../../shared/encoding";
 import { errorLogSummary } from "../../shared/errors";
 import { log, logStage } from "../../shared/logging";
-import { mapWithConcurrency } from "../concurrency";
+import { mapWithConcurrencyAndWeight } from "../concurrency";
 import { configWithFreshGeminiCookie } from "../cookies";
 import { type UploadBytesInput, uploadMultipartFile } from "./multipart";
 
 const MAX_PARALLEL_UPLOADS = 4;
+const MAX_IN_FLIGHT_ATTACHMENT_BYTES = 32 * 1024 * 1024;
 
 type UploadOneResult = {
 	candidate: AttachmentCandidate;
@@ -83,9 +84,11 @@ export async function resolveAttachments(
 		multipartUploads: 0,
 	};
 	const limits = attachmentLimitsFromConfig(activeCfg);
-	const uploadResults = await mapWithConcurrency(
+	const uploadResults = await mapWithConcurrencyAndWeight(
 		plan.candidates,
 		MAX_PARALLEL_UPLOADS,
+		MAX_IN_FLIGHT_ATTACHMENT_BYTES,
+		estimatedMaterializedBytes,
 		(candidate) =>
 			resolveOneRequestAttachment(
 				activeCfg,
@@ -460,16 +463,16 @@ async function uploadMaterializedAttachment(
 async function dedupeKey(
 	materialized: MaterializedAttachment,
 ): Promise<string> {
-	const prefix = TEXT_ENCODER.encode(
-		`${materialized.mime}\x00${materialized.filename}\x00`,
-	);
-	const bytes = new Uint8Array(
-		prefix.byteLength + materialized.bytes.byteLength,
-	);
-	bytes.set(prefix, 0);
-	bytes.set(materialized.bytes, prefix.byteLength);
-	const digest = await crypto.subtle.digest("SHA-256", bytes);
-	return bytesToHex(new Uint8Array(digest));
+	const digest = await crypto.subtle.digest("SHA-256", materialized.bytes);
+	return `${materialized.mime}\x00${materialized.filename}\x00${bytesToHex(new Uint8Array(digest))}`;
+}
+
+export const attachmentDedupeKeyForTest = dedupeKey;
+
+function estimatedMaterializedBytes(candidate: AttachmentCandidate): number {
+	if (candidate.source.type === "bytes")
+		return candidate.source.bytes.byteLength;
+	return Math.floor((String(candidate.source.data || "").length * 3) / 4);
 }
 
 function dropCodeFromError(

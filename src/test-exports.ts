@@ -132,11 +132,13 @@ export {
 } from "./gemini/uploads/tokens";
 export { buildMultipartFileBody } from "./gemini/uploads/multipart";
 export {
+	attachmentDedupeKeyForTest,
 	resolveFiles,
 	resolveImages,
 	uploadImage,
 	uploadTextFile,
 } from "./gemini/uploads/execute";
+export { mapWithConcurrencyAndWeight } from "./gemini/concurrency";
 export {
 	contextFilePromptByteCheck,
 	contextFileThreshold,

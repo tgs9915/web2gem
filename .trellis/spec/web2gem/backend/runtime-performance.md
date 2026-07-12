@@ -227,6 +227,65 @@ const flushResult = coalescer.flush();
 if (flushResult) await flushResult;
 ```
 
+## Scenario: Attachment Dedupe And In-Flight Memory
+
+### 1. Scope / Trigger
+
+Use this contract when changing request-local attachment materialization, deduplication, upload concurrency, or attachment memory limits.
+
+### 2. Signatures
+
+- `attachmentDedupeKeyForTest(materialized)` exposes the request-local key algorithm only to the test bundle.
+- `mapWithConcurrencyAndWeight(items, concurrency, maxWeight, weightOf, mapper)` preserves input ordering while limiting item count and aggregate active weight.
+- Attachment uploads use four workers and a 32 MiB normal in-flight materialized-byte budget.
+
+### 3. Contracts
+
+- Hash `materialized.bytes` directly. Do not prepend metadata into a payload-sized temporary buffer.
+- Include normalized MIME and filename alongside the payload digest so equal bytes with different metadata remain distinct.
+- Preserve pending-promise deduplication for identical concurrent attachments and preserve result order.
+- Weight admission is FIFO. An item above the normal byte budget may run only when no other weighted item is active, so valid large files still make progress without weakening the normal aggregate bound.
+
+### 4. Validation & Error Matrix
+
+- Same bytes, MIME, and filename -> one upload and repeated ordered references.
+- Same bytes with different MIME or filename -> distinct dedupe keys.
+- Several items fit under 32 MiB -> run subject to the four-item limit.
+- One valid item exceeds 32 MiB -> run alone; queued items resume after release.
+- Mapper throws -> release its weight in `finally` so later items cannot deadlock.
+
+### 5. Good/Base/Bad Cases
+
+- Good: digest the existing `Uint8Array`, then format a small metadata-plus-hex key.
+- Base: output arrays retain input order even when upload completion order differs.
+- Bad: allocate `new Uint8Array(prefix.length + payload.length)` solely for hashing.
+- Bad: reject or permanently queue a valid attachment only because it exceeds the normal aggregate budget.
+
+### 6. Tests Required
+
+- Unit test dedupe equivalence and MIME/filename distinctions.
+- Unit test FIFO weighted concurrency, ordered results, error release, and single oversized-item progress.
+- Preserve request-local pending-upload dedupe integration tests.
+- Benchmark a large attachment dedupe key and compare against the former copy-based path.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const copy = new Uint8Array(prefix.byteLength + materialized.bytes.byteLength);
+copy.set(prefix);
+copy.set(materialized.bytes, prefix.byteLength);
+await crypto.subtle.digest("SHA-256", copy);
+```
+
+#### Correct
+
+```typescript
+const digest = await crypto.subtle.digest("SHA-256", materialized.bytes);
+return `${materialized.mime}\0${materialized.filename}\0${bytesToHex(new Uint8Array(digest))}`;
+```
+
 ## Scenario: Tool-Sieve Held Candidate Performance
 
 ### 1. Scope / Trigger
